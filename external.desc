@@ -1,2 +1,2 @@
 name: ESP_LINUX_BSP
-desc: Buildroot 2025.02 external integration base
+desc: ESP32-S31 Linux Buildroot integration

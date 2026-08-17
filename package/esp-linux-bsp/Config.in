@@ -1,0 +1,6 @@
+config BR2_PACKAGE_HOST_ESP_LINUX_BSP
+	bool "host-esp-linux-bsp"
+	help
+	  Board support scripts for the ESP32-S31 Linux platform.
+	  Installs image-packaging tools from esp-linux-bsp into
+	  $(HOST_DIR)/share/esp-linux-bsp/tools/.

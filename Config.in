@@ -1,1 +1,1 @@
-# Package and board options are added by integration branches.
+source "$BR2_EXTERNAL_ESP_LINUX_BSP_PATH/package/esp-linux-bsp/Config.in"
