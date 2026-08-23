@@ -77,20 +77,8 @@ static void s31_queue_trace_receive(struct s31_queue *q, const void *item,
 			       ret, q->count, q->head);
 }
 
-static uint32_t s31_queue_create_count;
-static uint32_t s31_queue_dynamic_create_count;
-static uint32_t s31_queue_delete_count;
-static uint32_t s31_mutex_create_count;
-static uint32_t s31_sem_create_count;
 static uint32_t s31_sync_take_count;
 static uint32_t s31_sync_give_count;
-
-static const char *s31_queue_task_name(void)
-{
-	struct s31_tcb *t = s31_rtos_current();
-
-	return t ? t->name : (s31_rtos_in_isr() ? "isr" : "orphan");
-}
 
 static void s31_queue_init(struct s31_queue *q, uint32_t type,
 			   uint32_t len, uint32_t item_size, uint8_t *storage)
@@ -115,11 +103,6 @@ void *xQueueGenericCreate(uint32_t queue_len, uint32_t item_size,
 	struct s31_queue *q;
 	uint8_t *storage;
 	uint32_t total;
-	uint32_t count = ++s31_queue_dynamic_create_count;
-
-	if (count <= 16)
-		s31_linux_printf("[S31] queue dynamic create #%u len=%u item=%u type=%u\n",
-			       count, queue_len, item_size, queue_type);
 
 	if (!queue_len || (item_size &&
 	    queue_len > (UINT32_MAX - sizeof(*q)) / item_size))
@@ -134,9 +117,6 @@ void *xQueueGenericCreate(uint32_t queue_len, uint32_t item_size,
 		s31_rtos_free(q);
 		return NULL;
 	}
-	if (count <= 16)
-		s31_linux_printf("[S31] queue dynamic create #%u -> q=%p wait=%p storage=%p\n",
-			       count, q, q->wait_context, storage);
 	return q;
 }
 
@@ -145,20 +125,11 @@ void *xQueueGenericCreateStatic(uint32_t queue_len, uint32_t item_size,
 				uint8_t queue_type)
 {
 	struct s31_queue *q = static_queue;
-	uint32_t count = ++s31_queue_create_count;
-
-	if (count <= 16)
-		s31_linux_printf("[S31] queue static create #%u len=%u item=%u storage=%p static=%p type=%u\n",
-			       count, queue_len, item_size, storage, static_queue,
-			       queue_type);
 
 	if (!q || !queue_len || (item_size && !storage))
 		return NULL;
 	s31_queue_init(q, queue_type, queue_len, item_size, storage);
 	q->is_static = 1;
-	if (count <= 16)
-		s31_linux_printf("[S31] queue static create #%u -> q=%p wait=%p\n",
-			       count, q, q->wait_context);
 	return q->wait_context ? q : NULL;
 }
 
@@ -178,7 +149,6 @@ BaseType_t xQueueGenericGetStaticBuffers(void *queue, uint8_t **storage,
 void *xQueueCreateMutex(uint8_t type)
 {
 	struct s31_queue *q = s31_rtos_malloc(sizeof(*q));
-	uint32_t count = ++s31_mutex_create_count;
 
 	if (!q)
 		return NULL;
@@ -188,16 +158,12 @@ void *xQueueCreateMutex(uint8_t type)
 		s31_rtos_free(q);
 		return NULL;
 	}
-	if (count <= 32)
-		s31_linux_printf("[S31] mutex create #%u q=%p kind=%u task=%s\n",
-			       count, q, type, s31_queue_task_name());
 	return q;
 }
 
 void *xQueueCreateCountingSemaphore(uint32_t max, uint32_t initial)
 {
 	struct s31_queue *q;
-	uint32_t count = ++s31_sem_create_count;
 
 	if (!max || initial > max)
 		return NULL;
@@ -210,9 +176,6 @@ void *xQueueCreateCountingSemaphore(uint32_t max, uint32_t initial)
 		s31_rtos_free(q);
 		return NULL;
 	}
-	if (count <= 32)
-		s31_linux_printf("[S31] sem create #%u q=%p max=%u init=%u task=%s\n",
-			       count, q, max, initial, s31_queue_task_name());
 	return q;
 }
 
@@ -222,10 +185,6 @@ void vQueueDelete(void *queue)
 
 	if (!q)
 		return;
-	if (++s31_queue_delete_count <= 32)
-		s31_linux_printf("[S31] vQueueDelete #%u q=%p type=%u count=%u cap=%u static=%u wait=%p\n",
-			       s31_queue_delete_count, q, q->type, q->count,
-			       q->capacity, q->is_static, q->wait_context);
 	s31_linux_sync_destroy(q->wait_context);
 	q->wait_context = NULL;
 	if (!q->is_static)

@@ -19,10 +19,7 @@ static volatile TickType_t s31_tick;
 static volatile uint32_t s31_scheduler_started;
 static volatile uint32_t s31_orphan_critical_depth;
 static volatile uint32_t s31_orphan_critical_flags;
-static uint32_t s31_task_return_count;
 static uint32_t s31_task_delete_count;
-static uint32_t s31_task_yield_count;
-static uint32_t s31_task_delay_count;
 static uint32_t s31_task_priority_set_count;
 /* Linux's serialized radio worker executes the deferred Wi-Fi ISR, esp_timer
  * callbacks, and direct data-path calls.  Native FreeRTOS always has a
@@ -200,12 +197,7 @@ static void s31_rtos_task_entry(void *arg)
 	struct s31_tcb *t = arg;
 	int i;
 
-	if (++s31_task_return_count <= 16)
-		s31_linux_printf("[S31] compat task enter %s t=%p entry=%p\n",
-			       t->name, t, t->entry);
 	t->entry(t->arg);
-	if (s31_task_return_count <= 16)
-		s31_linux_printf("[S31] compat task returned %s t=%p\n", t->name, t);
 	if (!t->tls_cleaned) {
 		t->tls_cleaned = 1;
 		for (i = 0; i < 4; i++)
@@ -307,18 +299,8 @@ void vTaskDelay(TickType_t ticks)
 	if (s31_rtos_in_isr())
 		return;
 	if (!ticks) {
-		if (++s31_task_yield_count <= 32)
-			s31_linux_printf("[S31] vTaskDelay(0) yield #%u task=%s prio=%u\n",
-				       s31_task_yield_count,
-				       s31_rtos_current() ? s31_rtos_current()->name : "none",
-				       s31_rtos_current() ? s31_rtos_current()->priority : 0);
 		s31_linux_task_yield();
 	} else {
-		if (++s31_task_delay_count <= 64)
-			s31_linux_printf("[S31] vTaskDelay #%u ticks=%u task=%s prio=%u\n",
-			       s31_task_delay_count, ticks,
-			       s31_rtos_current() ? s31_rtos_current()->name : "none",
-			       s31_rtos_current() ? s31_rtos_current()->priority : 0);
 		s31_linux_task_delay(ticks);
 	}
 }

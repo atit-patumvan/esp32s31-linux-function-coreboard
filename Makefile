@@ -15,23 +15,16 @@ CPP := $(CROSS_COMPILE)cpp
 DTC := dtc
 JOBS ?= $(shell nproc)
 
-# S31 supports F and the stateful Espressif HWLoop/PIE extensions, but their
-# state CSRs are M-mode-only.  Saving them through SBI on every task switch can
-# lock S-mode interrupts at SIL=0xff, so stable SMP builds use only stateless
-# ISA extensions for both kernel and normal userspace.  Explicit Xesp test
-# binaries supply their own per-file flags in the Buildroot package.
+# S31 supports F and the stateful Espressif HWLoop/PIE extensions, but XespV is
+# unavailable on the Linux boot hart.  Keep kernel, runtime libraries and
+# normal userspace on stateless extensions.  Explicit extension tests opt in
+# per file and must not become dependencies of the normal root filesystem.
 S31_SAFE_ISA := rv32imabc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
 S31_KERNEL_ISA := rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
 S31_USER_ISA := rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
 S31_COMMON_FLAGS := -mabi=ilp32 -mtune=esp-base
 S31_KERNEL_FLAGS := -mabi=ilp32f -mtune=esp-base
 S31_USER_FLAGS := -march=$(S31_USER_ISA) $(S31_COMMON_FLAGS)
-# The S31 compiler supports Xesploop/XespV, but its bundled libc and libgcc
-# were built with stateful HWLoop instructions.  Linux deliberately avoids the
-# M-mode SBI context-switch extension for stable SMP, so use scalar runtime
-# libraries for normal userspace.  Explicit extension tests are still built by
-# s31-tools with the S31 compiler and opt-in ISA flags.
-S31_SCALAR_RUNTIME_SYSROOT ?= /opt/riscv32imac-musl/sysroot
 
 BUILD_DIR := $(CURDIR)/build
 OPENSBI_DIR := $(CURDIR)/opensbi-esp32-s31
@@ -211,14 +204,15 @@ radio-image: opensbi linux
 
 DEFCONFIG ?= esp32s31_defconfig
 LINUX_TARGET ?= xipImage
-# Default to maxcpus=1 for 100% boot; bring up second CPU after boot via
-# `echo 1 > /sys/devices/system/cpu/cpu1/online` for dual-core.  CMDLINE_FORCE
-# replaces, rather than extends, the defconfig command line, so retain the
-# rootfs and console arguments here as well.
-LINUX_CMDLINE ?= console=ttyS0,115200n8 root=/dev/mtdblock6 rootfstype=squashfs ro rootwait init=/init clk_ignore_unused irqaffinity=0 maxcpus=1
+S31_WIFI_ONLY ?= 1
+# CMDLINE_FORCE replaces, rather than extends, the defconfig command line, so
+# retain the rootfs and console arguments here as well.  Both HP harts start by
+# default; normal device IRQs remain pinned to hart 0 via irqaffinity=0.
+LINUX_CMDLINE ?= console=ttyS0,115200n8 root=/dev/mtdblock6 rootfstype=squashfs ro rootwait init=/init clk_ignore_unused irqaffinity=0
 
 radio-linux-payload: radio-bootloader
-	$(MAKE) -C $(CURDIR)/radio_firmware IDF_ROOT="$(IDF_ROOT)" linux-kbuild
+	$(MAKE) -C $(CURDIR)/radio_firmware IDF_ROOT="$(IDF_ROOT)" \
+		S31_WIFI_ONLY="$(S31_WIFI_ONLY)" linux-kbuild
 
 linux: toolchain radio-linux-payload | $(LINUX_OUT)
 	@echo "--- Linux ---"
@@ -232,17 +226,26 @@ linux: toolchain radio-linux-payload | $(LINUX_OUT)
 		--enable RISCV_ISA_ZBB \
 		--enable RISCV_ISA_ZBC \
 		--enable BT \
-		--enable BT_ESP32S31 \
 		--enable BT_BREDR \
 		--enable SMP \
 		--set-val NR_CPUS 2 \
 		--disable ESP32S31_COPROC_CONTEXT \
-		--enable CSD_LOCK_WAIT_DEBUG \
-		--enable CSD_LOCK_WAIT_DEBUG_DEFAULT \
+		--disable CSD_LOCK_WAIT_DEBUG \
+		--disable CSD_LOCK_WAIT_DEBUG_DEFAULT \
 		--enable PREEMPT_VOLUNTARY \
 		--disable PREEMPT_NONE \
+		--disable PREEMPT \
 		--enable HZ_100 \
-		--disable HZ_250
+		--disable HZ_250 \
+		--disable HZ_300 \
+		--disable HZ_1000
+	@if [ "$(S31_WIFI_ONLY)" = "1" ]; then \
+		$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
+			--disable BT_ESP32S31; \
+	else \
+		$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
+			--enable BT_ESP32S31; \
+	fi
 	@if [ -n "$(LINUX_CMDLINE)" ]; then \
 		$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
 			--set-str CMDLINE "$(LINUX_CMDLINE)"; \
@@ -264,10 +267,7 @@ coremark: rootfs | $(COREMARK_OUT)
 ROOTFS_PARTITION_SIZE ?= 6291456
 PERSIST_PARTITION_SIZE ?= 1441792
 BUILDROOT_MAKE = $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_OUT) \
-	BR2_EXTERNAL=$(BUILDROOT_EXTERNAL) BR2_DL_DIR=$(BUILDROOT_DL_DIR) \
-	S31_SCALAR_RUNTIME_SYSROOT=$(S31_SCALAR_RUNTIME_SYSROOT) \
-	S31_RUNTIME_STRIP=$(CROSS_COMPILE)strip \
-	S31_RUNTIME_OBJDUMP=$(CROSS_COMPILE)objdump
+	BR2_EXTERNAL=$(BUILDROOT_EXTERNAL) BR2_DL_DIR=$(BUILDROOT_DL_DIR)
 
 s31-pie-cases:
 	@$(MAKE) --no-print-directory idf-check

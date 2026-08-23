@@ -26,7 +26,6 @@ REQUIRED_GCC_PATCHES = (
     "0001-xesploop.patch",
     "0002-riscv-xesploop-reject-early-exit-loops.patch",
 )
-REQUIRED_MUSL_PATCH = "0002-riscv32-add-xespv-string-operations.patch"
 
 
 def run(command: list[str], *, cwd: Path) -> None:
@@ -142,7 +141,6 @@ def main() -> int:
     gcc_patch_dir = ctng_dir / "packages" / "gcc" / GCC_PATCH_VERSION
     musl_patch_dir = ctng_dir / "packages" / "musl" / MUSL_VERSION
     required_gcc_patches = tuple(gcc_patch_dir / name for name in REQUIRED_GCC_PATCHES)
-    required_musl_patch = musl_patch_dir / REQUIRED_MUSL_PATCH
     prefix = repo_root / "toolchain" / TARGET
     work_dir = repo_root / "build" / "crosstool-ng"
     sources_dir = repo_root / "build" / "toolchain-src"
@@ -153,7 +151,6 @@ def main() -> int:
         (kernel_dir, "S31 kernel source"),
         (wrappers_dir / "Cargo.toml", "Espressif RISC-V binutils wrappers"),
         *((patch, "bundled S31 GCC patch") for patch in required_gcc_patches),
-        (required_musl_patch, "bundled S31 musl patch"),
     ):
         if not path.exists():
             raise SystemExit(f"Missing {description}: {path}")
@@ -230,10 +227,9 @@ def main() -> int:
     run([str(gcc), "--version"], cwd=work_dir)
     verification_dir = work_dir / "s31-patch-verification"
     verification_dir.mkdir(exist_ok=True)
-    from scripts.wait_s31_toolchain_and_test import verify_compiler, verify_libc_xespv
+    from scripts.wait_s31_toolchain_and_test import verify_compiler
 
     verify_compiler(prefix, verification_dir, repo_root)
-    verify_libc_xespv(prefix, verification_dir, repo_root)
 
     # crosstool-NG finalizes the installed tree read-only.  Restore owner
     # write permission before adding the local-build metadata below.
@@ -241,7 +237,7 @@ def main() -> int:
     shutil.copy2(work_dir / ".config", prefix / "crosstool-ng.config")
     manifest = prefix / "s31-patch-sha256.txt"
     with manifest.open("w") as output:
-        for patch in (*required_gcc_patches, required_musl_patch):
+        for patch in required_gcc_patches:
             relative_patch = patch.relative_to(ctng_dir)
             output.write(
                 f"{hashlib.sha256(patch.read_bytes()).hexdigest()}  "

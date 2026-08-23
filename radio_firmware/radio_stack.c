@@ -19,6 +19,7 @@ extern void s31_linux_printf(const char *fmt, ...);
 extern void s31_rtos_use_internal_stacks(void);
 extern int s31_rtos_in_isr(void);
 extern int s31_rtos_can_yield(void);
+extern void s31_radio_wifi_rx_throttle(void);
 extern void s31_radio_timing_tx_done(bool status, const uint8_t *data,
 				     uint16_t length);
 /* These ROM-owned pointers live in retained SRAM.  A software reset from an
@@ -115,8 +116,6 @@ static int s31_wifi_start_requested;
 static int s31_wifi_start_complete;
 static int s31_wifi_rx_registered;
 static enum s31_wifi_pending_operation s31_wifi_pending;
-static uint32_t s31_wifi_rx_count;
-static uint32_t s31_wifi_tx_count;
 static uint32_t s31_wifi_tx_done_count;
 
 #define S31_TX_DESC_SAMPLES 24
@@ -330,23 +329,10 @@ void __wrap_lmacProcessTxError(int err_type, int status, void *arg)
 
 int __wrap_lmacTxDone(void *eb, int status)
 {
-	uint8_t *desc = NULL;
-	uint32_t w0 = 0;
-	uint32_t w4 = 0;
-	uint32_t count = ++s31_lmac_txdone_count;
+	s31_lmac_txdone_count++;
 
 	if (status != 0)
 		s31_lmac_txdone_bad_count++;
-	if (s31_radio_ptr_is_hpsram(eb, 56)) {
-		desc = *(uint8_t **)((uint8_t *)eb + 52);
-		if (s31_radio_ptr_is_hpsram(desc, 72)) {
-			w0 = *(uint32_t *)(desc + 0);
-			w4 = *(uint32_t *)(desc + 16);
-		}
-	}
-	if (count <= 4)
-		s31_linux_printf("[S31] LMACTXDONE #%u status=%d w0=%08x w4=%08x eb=%p\n",
-			       count, status, w0, w4, eb);
 	return __real_lmacTxDone(eb, status);
 }
 
@@ -449,32 +435,22 @@ static void s31_wifi_dump_tx_desc_samples(void)
  * bringing up its netstack-facing data path. */
 static void s31_wifi_netstack_ref(void *buffer)
 {
-	static uint32_t count;
-	if (++count <= 16)
-		s31_linux_printf("[S31] netstack ref #%u buffer=%p\n", count, buffer);
+	(void)buffer;
 }
 
 static void s31_wifi_netstack_free(void *buffer)
 {
-	static uint32_t count;
-	if (++count <= 16)
-		s31_linux_printf("[S31] netstack free #%u buffer=%p\n", count, buffer);
+	(void)buffer;
 }
 
 static void s31_wifi_tx_done(uint8_t interface, uint8_t *data,
 			     uint16_t *length, bool status)
 {
-	uint32_t count = ++s31_wifi_tx_done_count;
+	s31_wifi_tx_done_count++;
 
 	s31_radio_timing_tx_done(status, data, length ? *length : 0);
+	(void)interface;
 	(void)data;
-	/* s31_linux_printf() busy-polls the ROM UART, so a per-frame print here
-	 * serializes the whole gate hold behind 115200-baud output and was
-	 * measured as the long Wi-Fi queue-receive hold.  Keep only the first
-	 * few completions for bring-up diagnostics. */
-	if (!status && count <= 16)
-		s31_linux_printf("[S31] Wi-Fi TX done #%u if=%u len=%u ok=%u\n",
-			       count, interface, length ? *length : 0, status);
 }
 
 static void s31_wifi_set_intr(int32_t cpu_no, uint32_t source,
@@ -524,18 +500,14 @@ void s31_radio_wifi_free_rx_buffer(void *eb)
 static int s31_wifi_rx(void *buffer, uint16_t length, void *eb)
 {
 	int rc = s31_radio_wifi_receive_zerocopy(buffer, eb, length);
-	uint32_t count = ++s31_wifi_rx_count;
 
-	if (count <= 8 || rc)
-		s31_linux_printf("[S31] Wi-Fi RX #%u len=%u rc=%d\n",
-			       count, length, rc);
-
-	/* eb is NOT freed here anymore: it travels with the zero-copy RX
-	 * descriptor and is recycled by s31_radio_wifi_free_pending().  If the
-	 * ring was full (rc == -ENOSPC), recycle it right away so the frame is
-	 * dropped without leaking the buffer. */
-	if (rc)
+	/* The Linux bridge copied the frame into its staging ring.  Return the
+	 * closed driver's esf_buf before leaving the callback so RX progress does
+	 * not depend on the worker reacquiring the blob gate. */
+	if (eb)
 		esp_wifi_internal_free_rx_buffer(eb);
+	if (!rc)
+		s31_radio_wifi_rx_throttle();
 	return rc;
 }
 
@@ -565,7 +537,7 @@ static int s31_wifi_prepare(void)
 		if (!rc)
 			rc = esp_wifi_set_ps(WIFI_PS_NONE);
 		if (!rc)
-			rc = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW20);
+			rc = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW40);
 		if (!rc)
 			s31_wifi_prepared = 1;
 	}
@@ -800,7 +772,6 @@ int s31_radio_wifi_try_send(uint8_t *frame, uint16_t length)
 {
 	bool ipv4 = length >= 14 && frame[12] == 0x08 && frame[13] == 0x00;
 	int rc;
-	uint32_t count = ++s31_wifi_tx_count;
 
 	/* esp_wifi_internal_tx() only queues the Ethernet frame.  By the second
 	 * DHCP retry, the first one has traversed the asynchronous Wi-Fi task and
@@ -808,18 +779,6 @@ int s31_radio_wifi_try_send(uint8_t *frame, uint16_t length)
 	if (ipv4)
 		s31_tx_desc_ipv4_submit_count++;
 	rc = esp_wifi_internal_tx(WIFI_IF_STA, frame, length);
-
-	if (count <= 16 || rc) {
-		if (length >= 14)
-			s31_linux_printf("[S31] Wi-Fi TX #%u len=%u rc=%d dst=%02x:%02x:%02x:%02x:%02x:%02x src=%02x:%02x:%02x:%02x:%02x:%02x type=%02x%02x\n",
-				       count, length, rc,
-				       frame[0], frame[1], frame[2], frame[3], frame[4], frame[5],
-				       frame[6], frame[7], frame[8], frame[9], frame[10], frame[11],
-				       frame[12], frame[13]);
-		else
-				s31_linux_printf("[S31] Wi-Fi TX #%u len=%u rc=%d\n",
-				       count, length, rc);
-	}
 	return rc;
 }
 #endif
@@ -837,18 +796,23 @@ void s31_radio_stack_task(void *arg)
 	 * line serializes the gate hold behind 115200-baud output and was the
 	 * measured cause of the multi-hundred-ms Wi-Fi queue-receive hold. */
 	esp_log_level_set("*", ESP_LOG_WARN);
-	/* ESP-IDF "max WiFi throughput" reference sizing, allocated in internal
-	 * SRAM instead of PSRAM (AGENTS.md forbids blob buffers in PSRAM).  The
-	 * reclaimed heap-low + heap2 chunks give the pool room; the zero-copy RX
-	 * descriptor ring removed the 25.6 KiB data ring that previously forced
-	 * the no-PSRAM minimums. */
-	wifi_cfg.static_rx_buf_num = 32;
-	wifi_cfg.dynamic_rx_buf_num = 32;
+	/* The AP negotiates a 64-entry BA session even when rx_ba_win is smaller.
+	 * IDF requires static RX to cover the BA window and dynamic RX to be no
+	 * smaller than static. */
+	wifi_cfg.static_rx_buf_num = 64;
+	wifi_cfg.dynamic_rx_buf_num = 64;
+	/* Keep the native 11n receive aggregation path.  The Linux esp_timer shim
+	 * supplies the BlockAck reorder timeout and safely handles timer deletion
+	 * from callbacks. */
+	wifi_cfg.ampdu_rx_enable = 1;
 	/* TX buffer type/number follows sdkconfig.radio.defaults.  Static TX
 	 * avoids per-frame alloc/free churn but 16 buffers was too small for the
 	 * BT+WiFi ACK stream (esp_wifi_internal_tx rc=257); keep dynamic TX for
 	 * now while the TX completion stall is debugged. */
-	wifi_cfg.rx_ba_win = 32;
+	/* BA12 repeatedly stopped TCP receive after 0.75--3.5 MiB on this AP even
+	 * though the station remained associated.  BA6 completed full 50 MiB runs
+	 * and is also ESP-IDF's default without PSRAM-backed Wi-Fi allocations. */
+	wifi_cfg.rx_ba_win = 6;
 	/* TX_BA_WIN is a compile-time Kconfig, set via CONFIG_ESP_WIFI_TX_BA_WIN.
 	 * Keep the TX completion path healthy: shrinking TX buffers to 8 stalled
 	 * the download (rc=257) under ACK bursts. */

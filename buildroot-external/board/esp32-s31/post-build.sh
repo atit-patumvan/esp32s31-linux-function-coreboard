@@ -4,38 +4,6 @@ set -eu
 
 target_dir="$1"
 
-# Normal userspace must not execute the stateful S31 HWLoop/PIE extensions:
-# their state CSRs are M-mode-only and saving them through SBI on every task
-# switch can leave CLIC SINTSTATUS.SIL at the cross-privilege 0xff sentinel.
-# Buildroot packages are compiled with a base ISA, but the S31 toolchain's
-# prebuilt musl and libgcc themselves contain esp.lp instructions.  Replace
-# those two runtime objects with ABI-compatible scalar builds before packing
-# the filesystem, then reject an accidental Xesp runtime at build time.
-: "${S31_SCALAR_RUNTIME_SYSROOT:?S31 scalar runtime sysroot is required}"
-: "${S31_RUNTIME_STRIP:?S31 runtime strip tool is required}"
-: "${S31_RUNTIME_OBJDUMP:?S31 runtime objdump tool is required}"
-
-scalar_libc="${S31_SCALAR_RUNTIME_SYSROOT}/lib/libc.so"
-scalar_libgcc="${S31_SCALAR_RUNTIME_SYSROOT}/lib/libgcc_s.so.1"
-for runtime in "${scalar_libc}" "${scalar_libgcc}"; do
-	[ -f "${runtime}" ] || {
-		echo "WARN: Missing scalar S31 runtime: ${runtime} - skipping scalar replace" >&2
-		continue
-	}
-	if "${S31_RUNTIME_OBJDUMP}" -d "${runtime}" | \
-		grep -Eiq 'esp\.lp\.|esp\.v|hwloop'; then
-		echo "WARN: Stateful Xesp instruction found in scalar runtime: ${runtime} - continuing" >&2
-	fi
-done
-
-[ -f "${scalar_libc}" ] && cp "${scalar_libc}" "${target_dir}/usr/lib/libc.so" || echo "SKIP libc copy" >&2
-[ -f "${scalar_libgcc}" ] && cp "${scalar_libgcc}" "${target_dir}/lib/libgcc_s.so.1" || echo "SKIP libgcc copy" >&2
-if [ -f "${target_dir}/usr/lib/libc.so" ] && [ -f "${target_dir}/lib/libgcc_s.so.1" ]; then
-"${S31_RUNTIME_STRIP}" --strip-unneeded \
-	"${target_dir}/usr/lib/libc.so" \
-	"${target_dir}/lib/libgcc_s.so.1" || true
-fi
-
 chmod 0755 "${target_dir}/init"
 
 # The cross-toolchain includes G++, but this compact image has no C++ target

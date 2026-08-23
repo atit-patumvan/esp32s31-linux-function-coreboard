@@ -20,4 +20,7 @@ s31_rom.bin
 toolchain
 bootloader/managed_components/
 bootloader/build-radio/
+logs/
 docs/esp-idf-docs/
+__pycache__/
+*.py[cod]

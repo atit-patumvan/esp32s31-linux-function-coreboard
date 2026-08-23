@@ -115,9 +115,10 @@ Debug interpretation
 --------------------
 - A pending slot is a four-byte word. For example 0x3f400101 means IP=1,
   IE=1, ATTR=0x40 (MODE=S, positive level), CTL=0x3f.
-- `sintstatus=0xff00` alone does not prove that ID21 fired. Check OpenSBI's
-  machine-trap recorder and the actual raw ID. In the preserved SMP failures,
-  ID21 count was zero while radio was disabled.
+- `sintstatus=0xff00` alone does not prove that ID21 fired. Capture the actual
+  raw machine interrupt ID with temporary OpenSBI instrumentation when this
+  distinction matters; the permanent machine-trap recorder has been removed.
+  In the preserved SMP failures, ID21 count was zero while radio was disabled.
 - When halted, select each hart through DMI and validate cmderr before using
   S-mode CSR data. OpenOCD system-bus reads of cached PSRAM can be stale; a
   hart0 progbuf physical load can observe dirty shared D-cache data when needed.

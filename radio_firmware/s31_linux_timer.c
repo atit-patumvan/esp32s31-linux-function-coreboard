@@ -138,22 +138,41 @@ void s31_linux_timer_advance(void)
 
 void s31_linux_timers_tick(void)
 {
-	struct esp_timer *timer, *next;
-	uint64_t now_us = s31_timer_now_us();
+	unsigned int callbacks = 0;
+	struct esp_timer *timer;
+	uint64_t now_us;
 
-	for (timer = s31_timers; timer; timer = next) {
+	/* A callback is allowed to delete any timer, including the next element
+	 * in the list.  Re-scan after each dispatch instead of retaining a pointer
+	 * across the callback.  This matches esp_timer's serialized task dispatch
+	 * and avoids losing the Wi-Fi BA reorder timeout to a stale list link. */
+	for (;;) {
 		esp_timer_cb_t callback;
 		void *arg;
+		struct esp_timer *candidate;
 
-		next = timer->next;
-		if (!timer->active || timer->alarm_us > now_us)
-			continue;
+		now_us = s31_timer_now_us();
+		timer = NULL;
+		for (candidate = s31_timers; candidate;
+		     candidate = candidate->next) {
+			if (candidate->active && candidate->alarm_us <= now_us) {
+				timer = candidate;
+				break;
+			}
+		}
+		if (!timer || callbacks++ == 64)
+			break;
+
 		callback = timer->callback;
 		arg = timer->arg;
-		if (timer->period_us)
-			timer->alarm_us += timer->period_us;
-		else
+		if (timer->period_us) {
+			uint64_t elapsed = now_us - timer->alarm_us;
+
+			timer->alarm_us +=
+				(elapsed / timer->period_us + 1) * timer->period_us;
+		} else {
 			timer->active = false;
+		}
 		callback(arg);
 	}
 }

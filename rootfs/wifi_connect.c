@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -31,6 +32,32 @@ struct sha1_ctx {
 };
 
 static uint32_t sequence;
+
+static int interface_up(const char *name)
+{
+	struct ifreq ifr = { };
+	int fd;
+
+	if (strlen(name) >= sizeof(ifr.ifr_name)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd < 0)
+		return -1;
+	strcpy(ifr.ifr_name, name);
+	if (ioctl(fd, SIOCGIFFLAGS, &ifr) < 0) {
+		close(fd);
+		return -1;
+	}
+	ifr.ifr_flags |= IFF_UP;
+	if (ioctl(fd, SIOCSIFFLAGS, &ifr) < 0) {
+		close(fd);
+		return -1;
+	}
+	close(fd);
+	return 0;
+}
 
 static uint32_t rol(uint32_t value, unsigned int bits)
 {
@@ -275,6 +302,7 @@ int main(int argc, char **argv)
 		}
 	}
 	ifindex = if_nametoindex(argv[1]); if (!ifindex) { perror(argv[1]); return 1; }
+	if (interface_up(argv[1])) { perror("interface up"); return 1; }
 	if (argv[3][0])
 		derive_pmk(argv[3], argv[2], pmk);
 	fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
