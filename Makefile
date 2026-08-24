@@ -45,6 +45,8 @@ OPENSBI_OUT := $(BUILD_DIR)/opensbi
 LINUX_OUT := $(BUILD_DIR)/linux
 BUILDROOT_OUT := $(BUILD_DIR)/buildroot
 BUILDROOT_DL_DIR := $(BUILD_DIR)/buildroot-dl
+COREMARK_OUT := $(BUILD_DIR)/coremark
+COREMARK_BIN := $(COREMARK_OUT)/coremark.exe
 TOOLCHAIN_ARCHIVE := $(BUILD_DIR)/downloads/$(TOOLCHAIN_RELEASE_ASSET)
 
 PARTITIONS_CSV := $(CURDIR)/bootloader/partitions.csv
@@ -61,7 +63,7 @@ PERSIST_IMG := $(BUILD_DIR)/persist.jffs2
 IDF_ROOT ?= $(HOME)/.espressif
 # Keep the ESP-IDF dependency local to its installation root.  The master
 # checkout is preferred, with an installed alternate accepted as a fallback.
-IDF_EXPORT ?= $(firstword $(wildcard $(IDF_ROOT)/master/esp-idf/export.sh) $(shell find $(IDF_ROOT) -maxdepth 5 -type f -path '*/esp-idf/export.sh' 2>/dev/null | sort | head -n 1))
+IDF_EXPORT ?= $(firstword $(wildcard $(IDF_ROOT)/master/esp-idf/export.sh) $(wildcard $(IDF_PATH)/export.sh) $(shell find $(IDF_ROOT) -maxdepth 5 -type f -path '*/esp-idf/export.sh' 2>/dev/null | sort | head -n 1))
 
 .PHONY: all download toolchain toolchain-source idf-check opensbi radio-linux-payload radio-bootloader radio-image linux coremark rootfs initramfs s31-pie-cases \
 	buildroot-menuconfig buildroot-clean clean fullclean flash-opensbi flash-linux \
@@ -69,7 +71,7 @@ IDF_EXPORT ?= $(firstword $(wildcard $(IDF_ROOT)/master/esp-idf/export.sh) $(she
 
 all: toolchain download opensbi linux initramfs
 
-$(BUILD_DIR) $(OPENSBI_OUT) $(LINUX_OUT) $(BUILDROOT_OUT):
+$(BUILD_DIR) $(OPENSBI_OUT) $(LINUX_OUT) $(BUILDROOT_OUT) $(COREMARK_OUT):
 	mkdir -p $@
 
 download: toolchain
@@ -251,9 +253,11 @@ linux: toolchain radio-linux-payload | $(LINUX_OUT)
 	cp -v $(LINUX_OUT)/arch/riscv/boot/$(LINUX_TARGET) $(XIP_IMAGE)
 	cp -v $(LINUX_OUT)/arch/riscv/boot/dts/espressif/esp32s31_generic.dtb $(FDT_DTB)
 
-coremark: rootfs
+coremark: rootfs | $(COREMARK_OUT)
 	@test -x "$(BUILDROOT_OUT)/target/usr/bin/coremark"
-	@echo "Buildroot CoreMark: $(BUILDROOT_OUT)/target/usr/bin/coremark"
+	@mkdir -p "$(COREMARK_OUT)"
+	@cp -v "$(BUILDROOT_OUT)/target/usr/bin/coremark" "$(COREMARK_BIN)"
+	@echo "CoreMark: $(COREMARK_BIN)"
 
 # Keep this decimal because POSIX test(1) and truncate(1) do not accept the
 # partition table's 0x-prefixed value.
@@ -279,11 +283,11 @@ rootfs: toolchain s31-pie-cases | $(BUILDROOT_OUT)
 	$(BUILDROOT_MAKE)
 	cp -v $(BUILDROOT_OUT)/images/rootfs.squashfs $(ROOTFS_IMG)
 	@ROOTFS_SIZE=$$(stat -c%s $(ROOTFS_IMG)); \
+	echo "Buildroot rootfs: $$ROOTFS_SIZE / $(ROOTFS_PARTITION_SIZE) bytes ($$(( $(ROOTFS_PARTITION_SIZE) - $$ROOTFS_SIZE )) bytes free)"; \
 	if [ $$ROOTFS_SIZE -gt $(ROOTFS_PARTITION_SIZE) ]; then \
 		echo "ERROR: Buildroot rootfs ($$ROOTFS_SIZE bytes) exceeds partition ($(ROOTFS_PARTITION_SIZE) bytes)"; \
 		exit 1; \
-	fi; \
-	truncate -s $(ROOTFS_PARTITION_SIZE) $(ROOTFS_IMG)
+	fi
 
 # Historical/user-facing name for the root filesystem image.
 initramfs: linux rootfs
