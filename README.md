@@ -1,5 +1,4 @@
-# Linux 6.12 for ESP32-S31
-
+# Linux 6.18 for ESP32-S31
 MMU RV32 Linux running natively on an ESP32-S31 microcontroller.
 
 Module tested: ESP32-S31-WROOM-3 E1H16R16V (ESP32-S31 Core Board/Korvo).
@@ -57,13 +56,13 @@ $ esptool -p /dev/ttyUSB0 -b 2000000 write-flash \
 |---|---|
 | AXI GDMA | 🟡 Experimental |
 | AHB GDMA | 🟡 Experimental |
-| Cache driver | 🟡 Experimental |
+| Cache driver | 🟡 Experimental (Tested since SMP) |
 | TRNG | 🟡 Experimental |
 | eFuse | 🟡 Experimental |
 | Watchdog | 🟡 Experimental |
 | PWM, counter, analog peripherals | 🟡 Experimental |
-| CLIC/CLINT interrupt driver | 🟡 Experimental |
-| Flash MTD driver | 🟡 Experimental |
+| CLIC/CLINT interrupt driver | 🟡 Experimental (Tested since SMP) |
+| Flash MTD driver | 🟡 Experimental (Tested since SMP) |
 | Timers | 🟠 WIP |
 | Clock tree | 🟠 WIP |
 | Security accelerators | 🟠 WIP |
@@ -74,11 +73,11 @@ $ esptool -p /dev/ttyUSB0 -b 2000000 write-flash \
 ### Connectivity Drivers
 | Feature | Status |
 |---|---|
-| UART0 console | 🟢 Stable |
+| UART0 console | 🟢 Stable (Tested since SMP) |
 | UART1/2 | 🟡 Experimental |
 | GMAC Ethernet | 🟡 Experimental |
 | SDMMC | 🟡 Experimental |
-| GPIO | 🟡 Experimental |
+| GPIO | 🟡 Experimental (Tested since SMP) |
 | pinctrl/GPIO Matrix | 🟡 Experimental |
 | USB | 🟠 WIP |
 | I2C | 🔴 Not Implemented |
