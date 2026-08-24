@@ -167,9 +167,12 @@ opensbi: toolchain | $(OPENSBI_OUT)
 
 uboot: idf-check opensbi | $(UBOOT_OUT)
 	@echo "--- U-Boot SPL + proper ---"
-	$(MAKE) -C $(UBOOT_DIR) O=$(UBOOT_OUT) ARCH=riscv \
+	# ESP-IDF prepends its private Python environment to PATH.  Binman needs
+	# the distro pkg_resources/pyelftools modules installed by the host, so keep
+	# the system Python ahead of the IDF environment for the U-Boot build only.
+	PATH="/usr/bin:/bin:$$PATH" $(MAKE) -C $(UBOOT_DIR) O=$(UBOOT_OUT) ARCH=riscv \
 		CROSS_COMPILE="$(CROSS_COMPILE)" espressif_esp32s31_defconfig
-	$(MAKE) -C $(UBOOT_DIR) O=$(UBOOT_OUT) ARCH=riscv \
+	PATH="/usr/bin:/bin:$$PATH" $(MAKE) -C $(UBOOT_DIR) O=$(UBOOT_OUT) ARCH=riscv \
 		CROSS_COMPILE="$(CROSS_COMPILE)" \
 		OPENSBI=$(OPENSBI_FW_DYNAMIC_BIN) -j$(JOBS)
 	cp -v $(UBOOT_OUT)/u-boot.itb $(UBOOT_ITB)
