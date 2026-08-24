@@ -1,6 +1,6 @@
 # ESP32-S31 ISA extension experiments
 
-Last updated: 2026-07-30
+Last updated: 2026-08-24
 
 ## Hardware and toolchain baseline
 
@@ -22,9 +22,12 @@ Last updated: 2026-07-30
 ## Board results
 
 The test image was built from `rootfs/s31_ext_test.S` and
-`rootfs/s31_ext_test.c` and run on ESP32-S31 revision v0.0, hart 1 under Linux
-6.12.  Each Xespv instruction is isolated in a child process with a two-second
+`rootfs/s31_ext_test.c` and run on ESP32-S31 revision v0.0, CPU1 under Linux
+6.18. `libesp-simd` pins the process before `main()`. Each Xespv instruction
+is isolated in a child process with a two-second
 alarm so one illegal or non-terminating instruction cannot hide later results.
+The dispatcher initializes q0..q7 before every case; indexed vector loads and
+stores otherwise consume inherited q-register contents as unsafe offsets.
 
 | Extension | Coverage | Result |
 | --- | ---: | --- |
@@ -69,57 +72,52 @@ checks that exactly 354 four-byte instructions were emitted, and writes
 649e5fc30c7de30326715c4ef91af6710bd8fe7c44bbb105e60622fe5257de79
 ```
 
-Do not hand-edit the generated include.  `make initramfs` regenerates it.
+Do not hand-edit the generated include. `make rootfs` regenerates it.
 
 ## Optimization policy
 
-The S31 Linux/musl compiler is configured for:
+Ordinary S31 Linux userspace is configured for:
 
 ```text
-rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs_
-xesploop_xespv
+rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs_xesploop
 ```
 
-with `-mabi=ilp32 -mespv-spec=2p2`.  This exposes all compiler-supported S31
-extensions and includes compressed instructions.  Components must still obey
-their execution-context rules:
+with `-mabi=ilp32`. Xesploop is therefore available to normal compiler output.
+XespV is built only into `libesp-simd` and extension tests with
+`_xespv2p2 -mespv-spec=2p2`; the library pins each using thread to CPU1 before
+executing PIE code. Components must still obey their execution-context rules:
 
 - Linux kernel C code must not emit floating-point or PIE instructions because
   kernel execution cannot borrow userspace coprocessor state arbitrarily.
 - OpenSBI trap paths must preserve S-mode FPU, HWLoop and PIE state before any
   implementation code can use those resources.
-- Userland may use F, compressed, bit-manipulation, Xesploop and Xespv.  The
-  single failing FFT store form above must not be selected explicitly until its
-  prerequisite or silicon support is understood.
+- Normal userland may use F, compressed, bit-manipulation and Xesploop. XespV
+  callers must use `libesp-simd`; the single failing FFT store form above is
+  treated as an expected rev0.0 silicon exception and is not used by the
+  library.
 
-## Linux/musl toolchain and optimized image audit
+## Current image audit
 
-The `GrieferPig/crosstool-NG-s31` workflow builds the configuration in
-`configs/riscv32-esp-linux-musl.config`; `make toolchain` installs its pinned
-release and `make toolchain-source` rebuilds it from a sibling checkout.  The
-resulting tuple and versions are:
+The current tuple and versions are:
 
 ```text
 riscv32-esp-linux-musl
 GCC 15.2.0 (Espressif GCC commit 0dbf584943ac179894690b389f3a37926bb4cd33)
 binutils 2.45 (Espressif binutils commit 99fe9ecb9fb65a69be65944eb1bbd7e42dfe0857)
-musl 1.2.5, Linux headers 6.12, ilp32 ABI
+musl 1.2.5, Linux UAPI headers 6.12, ilp32 ABI; running kernel 6.18
 ```
 
-The 2026-07-30 clean builds made through the root Makefile produced these
-artifact-level results.  The compressed ratios count decoded 16-bit
-instructions rather than relying only on configuration symbols.
+The 2026-08-24 build and physical-board run produced these artifact-level
+results:
 
-| Artifact | Effective policy / ELF result | 16-bit instructions |
-| --- | --- | ---: |
-| OpenSBI `fw_payload.elf` | integer-safe IMA+B+C; no automatic F/Xesp state use | 29,932 / 52,577 (56.93%) |
-| Linux `vmlinux` | `CONFIG_RISCV_ISA_C=y`, V disabled; integer-safe IMA+B+C C code | 753,868 / 1,207,698 (62.42%) |
-| Buildroot BusyBox | full userspace ISA through the compiler wrapper | 100,040 / 179,575 (55.71%) |
-| Buildroot CoreMark | full userspace ISA through the compiler wrapper | 1,968 / 3,649 (53.93%) |
-| `s31-ext-test` | ELF attribute includes F, C, B, Xesploop 1.0 and Xespv 2.2 | 348 / 1,602 (21.72%) |
+| Artifact | Effective policy / result |
+| --- | --- |
+| Linux `vmlinux` | 6.18 SMP, `CONFIG_ESP32S31_COPROC_CONTEXT=y` |
+| Buildroot BusyBox | ELF includes Xesploop 1.0 and excludes XespV |
+| two-thread CoreMark | ELF includes Xesploop; 15 `esp.lp` sites; 1941.23 iterations/s, CRC valid |
+| `libesp-simd.so.1` | ELF includes Xesploop 1.0 and XespV 2.2; only `esp_simd_*` APIs exported |
+| `s31-ext-test` | Xesploop 6/6; XespV 353/354 plus one expected rev0.0 exception; context pass |
 
-The unpadded XZ squashfs is 5,812,224 bytes and the flashed image is padded to
-the 6,144,000-byte partition size.  The compiler contains G++, but no selected
-target package uses C++; the otherwise-unused `libstdc++.so` runtime is omitted
-from the compact board image in the post-build step.  An ELF dependency scan
-confirmed that no installed executable requires it.
+The XZ squashfs is 2,412,544 bytes in a 4 MiB rootfs partition. The complete
+boot, instruction, context and CoreMark record is
+`logs/xesploop-xespv-simd-final-ttyUSB0-20260824.log`.

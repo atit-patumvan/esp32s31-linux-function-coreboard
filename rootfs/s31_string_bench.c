@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
+#include "esp_simd.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,26 +9,6 @@
 
 #define SIZE (256U * 1024U)
 #define TOTAL (16U * 1024U * 1024U)
-
-extern void *s31_xespv_memcpy(void *, const void *, size_t);
-extern void *s31_xespv_memset(void *, int, size_t);
-extern void *s31_xespv_memmove(void *, const void *, size_t);
-extern void *s31_xespv_memchr(const void *, int, size_t);
-extern void *s31_xespv_memrchr(const void *, int, size_t);
-extern int s31_xespv_memcmp(const void *, const void *, size_t);
-extern void *s31_xespv_memccpy(void *, const void *, int, size_t);
-extern size_t s31_xespv_strlen(const char *);
-extern size_t s31_xespv_strnlen(const char *, size_t);
-extern char *s31_xespv_strchrnul(const char *, int);
-extern char *s31_xespv_strchr(const char *, int);
-extern int s31_xespv_strcmp(const char *, const char *);
-extern char *s31_xespv_stpcpy(char *, const char *);
-extern char *s31_xespv_strcpy(char *, const char *);
-extern char *s31_xespv_stpncpy(char *, const char *, size_t);
-extern char *s31_xespv_strncpy(char *, const char *, size_t);
-extern size_t s31_xespv_strlcpy(char *, const char *, size_t);
-extern void s31_xespv_eq16(unsigned char *, const unsigned char *,
-			   const unsigned char *);
 
 static uint64_t now_ns(void)
 {
@@ -53,22 +34,22 @@ static int memory_correctness(void)
 	for (off = 0; off < 32; off++) for (n = 0; n <= 320; n++) {
 		memset(x, 0xa5, sizeof x); memset(y, 0xa5, sizeof y);
 		memcpy(x + off, a + off, n);
-		s31_xespv_memcpy(y + off, a + off, n);
+		esp_simd_memcpy(y + off, a + off, n);
 		if (memcmp(x, y, sizeof x)) return 10;
 		memset(x + off, 0x6d, n);
-		s31_xespv_memset(y + off, 0x6d, n);
+		esp_simd_memset(y + off, 0x6d, n);
 		if (memcmp(x, y, sizeof x)) return 11;
 		memcpy(b, a, sizeof b);
 		if (memchr(a + off, a[off + n / 2], n) !=
-		    s31_xespv_memchr(a + off, a[off + n / 2], n)) return 12;
+		    esp_simd_memchr(a + off, a[off + n / 2], n)) return 12;
 		if (memrchr(a + off, a[off + n / 2], n) !=
-		    s31_xespv_memrchr(a + off, a[off + n / 2], n)) return 13;
+		    esp_simd_memrchr(a + off, a[off + n / 2], n)) return 13;
 		{
 			int normal = memcmp(a + off, b + off, n);
-			int vector = s31_xespv_memcmp(a + off, b + off, n);
+			int vector = esp_simd_memcmp(a + off, b + off, n);
 			if (!same_sign(normal, vector)) {
 				unsigned char mask[16] __attribute__((aligned(16)));
-				s31_xespv_eq16(mask, a + off, b + off);
+				esp_simd_eq_u8x16(mask, a + off, b + off);
 				printf("memcmp equal mismatch: off=%zu n=%zu libc=%d XespV=%d\n",
 				       off, n, normal, vector);
 				printf("direct eq16 mask:");
@@ -81,7 +62,7 @@ static int memory_correctness(void)
 			b[off + n / 2] ^= 0x80;
 			{
 				int normal = memcmp(a + off, b + off, n);
-				int vector = s31_xespv_memcmp(a + off, b + off, n);
+				int vector = esp_simd_memcmp(a + off, b + off, n);
 				if (!same_sign(normal, vector)) {
 					printf("memcmp difference mismatch: off=%zu n=%zu libc=%d XespV=%d\n",
 					       off, n, normal, vector);
@@ -94,11 +75,11 @@ static int memory_correctness(void)
 	for (off = 0; off < 32; off++) for (n = 0; n <= 256; n++) {
 		memcpy(x, a, sizeof x); memcpy(y, a, sizeof y);
 		memmove(x + off + 17, x + off, n);
-		s31_xespv_memmove(y + off + 17, y + off, n);
+		esp_simd_memmove(y + off + 17, y + off, n);
 		if (memcmp(x, y, sizeof x)) return 16;
 		memcpy(x, a, sizeof x); memcpy(y, a, sizeof y);
 		memmove(x + off, x + off + 17, n);
-		s31_xespv_memmove(y + off, y + off + 17, n);
+		esp_simd_memmove(y + off, y + off + 17, n);
 		if (memcmp(x, y, sizeof x)) return 17;
 	}
 	return 0;
@@ -116,43 +97,43 @@ static int string_correctness(void)
 		for (i = 0; i < sizeof a; i++) a[i] = (char)('a' + i % 23);
 		a[off + len] = 0;
 		memcpy(b, a, sizeof b);
-		if (strlen(a + off) != s31_xespv_strlen(a + off)) return 20;
+		if (strlen(a + off) != esp_simd_strlen(a + off)) return 20;
 		n = len / 2;
-		if (strnlen(a + off, 0) != s31_xespv_strnlen(a + off, 0) ||
-		    strnlen(a + off, n) != s31_xespv_strnlen(a + off, n) ||
-		    strnlen(a + off, len) != s31_xespv_strnlen(a + off, len) ||
+		if (strnlen(a + off, 0) != esp_simd_strnlen(a + off, 0) ||
+		    strnlen(a + off, n) != esp_simd_strnlen(a + off, n) ||
+		    strnlen(a + off, len) != esp_simd_strnlen(a + off, len) ||
 		    strnlen(a + off, len + 8) !=
-		    s31_xespv_strnlen(a + off, len + 8)) return 21;
-		if (strchrnul(a + off, 'z') != s31_xespv_strchrnul(a + off, 'z')) return 22;
+		    esp_simd_strnlen(a + off, len + 8)) return 21;
+		if (strchrnul(a + off, 'z') != esp_simd_strchrnul(a + off, 'z')) return 22;
 		if (strchr(a + off, a[off + len / 2]) !=
-		    s31_xespv_strchr(a + off, a[off + len / 2])) return 23;
+		    esp_simd_strchr(a + off, a[off + len / 2])) return 23;
 		if (!same_sign(strcmp(a + off, b + off),
-		               s31_xespv_strcmp(a + off, b + off))) return 24;
+		               esp_simd_strcmp(a + off, b + off))) return 24;
 		if (len) {
 			b[off + len / 2] = 'z';
 			if (!same_sign(strcmp(a + off, b + off),
-			               s31_xespv_strcmp(a + off, b + off))) return 25;
+			               esp_simd_strcmp(a + off, b + off))) return 25;
 		}
 		memset(x, 0xa5, sizeof x); memset(y, 0xa5, sizeof y);
 		if (stpcpy(x + off, a + off) - (x + off) !=
-		    s31_xespv_stpcpy(y + off, a + off) - (y + off) ||
+		    esp_simd_stpcpy(y + off, a + off) - (y + off) ||
 		    memcmp(x, y, sizeof x)) return 26;
 		memset(x, 0xa5, sizeof x); memset(y, 0xa5, sizeof y);
 		if (strcpy(x + off, a + off) != x + off ||
-		    s31_xespv_strcpy(y + off, a + off) != y + off ||
+		    esp_simd_strcpy(y + off, a + off) != y + off ||
 		    memcmp(x, y, sizeof x)) return 27;
 		n = len + 8;
 		memset(x, 0xa5, sizeof x); memset(y, 0xa5, sizeof y);
 		if (stpncpy(x + off, a + off, n) - (x + off) !=
-		    s31_xespv_stpncpy(y + off, a + off, n) - (y + off) ||
+		    esp_simd_stpncpy(y + off, a + off, n) - (y + off) ||
 		    memcmp(x, y, sizeof x)) return 28;
 		memset(x, 0xa5, sizeof x); memset(y, 0xa5, sizeof y);
 		strncpy(x + off, a + off, n);
-		s31_xespv_strncpy(y + off, a + off, n);
+		esp_simd_strncpy(y + off, a + off, n);
 		if (memcmp(x, y, sizeof x)) return 29;
 		memset(x, 0xa5, sizeof x); memset(y, 0xa5, sizeof y);
 		if (strlcpy(x + off, a + off, len / 2 + 1) !=
-		    s31_xespv_strlcpy(y + off, a + off, len / 2 + 1) ||
+		    esp_simd_strlcpy(y + off, a + off, len / 2 + 1) ||
 		    memcmp(x, y, sizeof x)) return 30;
 	}
 	return 0;
@@ -169,10 +150,50 @@ static int memccpy_correctness(void)
 		void *p, *q;
 		memset(x, 0, sizeof x); memset(y, 0, sizeof y);
 		p = memccpy(x, a, n ? a[n / 2] : 7, n);
-		q = s31_xespv_memccpy(y, a, n ? a[n / 2] : 7, n);
+		q = esp_simd_memccpy(y, a, n ? a[n / 2] : 7, n);
 		if ((p ? (unsigned char *)p - x : -1) !=
 		    (q ? (unsigned char *)q - y : -1) || memcmp(x, y, sizeof x)) return 31;
 	}
+	return 0;
+}
+
+static int vector_api_correctness(void)
+{
+	uint8_t lhs[288] __attribute__((aligned(64)));
+	uint8_t rhs[288] __attribute__((aligned(64)));
+	uint8_t out[288] __attribute__((aligned(64)));
+	uint8_t expected[288] __attribute__((aligned(64)));
+	uint8_t mask[16] __attribute__((aligned(16)));
+	size_t off, n, i;
+
+	for (i = 0; i < sizeof lhs; i++) {
+		lhs[i] = (uint8_t)(i * 37U + 9U);
+		rhs[i] = (uint8_t)(i * 19U + 71U);
+	}
+	for (off = 0; off < 16; off++) for (n = 0; n <= 256; n++) {
+		memset(out, 0xa5, sizeof out);
+		memset(expected, 0xa5, sizeof expected);
+		for (i = 0; i < n; i++) {
+			unsigned int sum = lhs[off + i] + rhs[off + i];
+
+			expected[off + i] = sum > UINT8_MAX ? UINT8_MAX : sum;
+		}
+		esp_simd_add_sat_u8(out + off, lhs + off, rhs + off, n);
+		if (memcmp(out, expected, sizeof out)) {
+			for (i = 0; i < sizeof out; i++)
+				if (out[i] != expected[i]) break;
+			printf("add_sat_u8 mismatch: off=%zu n=%zu byte=%zu got=%02x expected=%02x lhs=%02x rhs=%02x\n",
+			       off, n, i, out[i], expected[i], lhs[i], rhs[i]);
+			return 32;
+		}
+	}
+
+	esp_simd_eq_u8x16(mask, lhs, lhs);
+	for (i = 0; i < sizeof mask; i++)
+		if (mask[i] != 0xff) return 33;
+	esp_simd_eq_u8x16(mask, lhs, rhs);
+	for (i = 0; i < sizeof mask; i++)
+		if (mask[i] != (lhs[i] == rhs[i] ? 0xff : 0)) return 34;
 	return 0;
 }
 
@@ -218,37 +239,42 @@ int main(void)
 {
 	unsigned char *a, *b, *d;
 	int rc;
+	if (esp_simd_init()) {
+		perror("esp_simd_init");
+		return 2;
+	}
+	printf("libesp-simd affinity: CPU%d\n", esp_simd_cpu());
 	if (posix_memalign((void **)&a, 64, SIZE + 128) ||
 	    posix_memalign((void **)&b, 64, SIZE + 128) ||
 	    posix_memalign((void **)&d, 64, SIZE + 128)) return 2;
 	if ((rc = memory_correctness()) || (rc = string_correctness()) ||
-	    (rc = memccpy_correctness())) {
+	    (rc = memccpy_correctness()) || (rc = vector_api_correctness())) {
 		printf("XespV correctness: FAIL (%d)\n", rc);
 		return 1;
 	}
-	puts("XespV correctness: PASS (17 routines, aligned/misaligned/tails/overlap)");
+	puts("XespV correctness: PASS (17 libc-style + eq/add APIs; aligned/misaligned/tails/overlap)");
 	memset(a, 'a', SIZE); memset(b, 'a', SIZE); memset(d, 0, SIZE);
 	a[SIZE-1] = b[SIZE-1] = 0;
 	puts("aligned 256 KiB ranges, 16 MiB per result");
 	puts("routine      libc MiB/s  XespV MiB/s  speedup");
-	RUN3("memcpy", memcpy, s31_xespv_memcpy, d, a, SIZE);
-	RUN3("memset", memset, s31_xespv_memset, d, 0x5a, SIZE);
-	RUN3("memmove", memmove, s31_xespv_memmove, d, a, SIZE);
-	RUN3("memchr", memchr, s31_xespv_memchr, a, 0, SIZE);
-	RUN3("memrchr", memrchr, s31_xespv_memrchr, a, '!', SIZE);
-	RUN3("memcmp", memcmp, s31_xespv_memcmp, a, b, SIZE);
-	RUN1("strlen", strlen, s31_xespv_strlen, (char *)a);
-	RUN2("strnlen", strnlen, s31_xespv_strnlen, (char *)a, SIZE);
-	RUN2("strchrnul", strchrnul, s31_xespv_strchrnul, (char *)a, '!');
-	RUN2("strchr", strchr, s31_xespv_strchr, (char *)a, '!');
-	RUN2("strcmp", strcmp, s31_xespv_strcmp, (char *)a, (char *)b);
-	RUN2("stpcpy", stpcpy, s31_xespv_stpcpy, (char *)d, (char *)a);
-	RUN2("strcpy", strcpy, s31_xespv_strcpy, (char *)d, (char *)a);
-	RUN3("stpncpy", stpncpy, s31_xespv_stpncpy, (char *)d, (char *)a, SIZE);
-	RUN3("strncpy", strncpy, s31_xespv_strncpy, (char *)d, (char *)a, SIZE);
-	RUN4("memccpy", memccpy, s31_xespv_memccpy, d, a, 0, SIZE);
+	RUN3("memcpy", memcpy, esp_simd_memcpy, d, a, SIZE);
+	RUN3("memset", memset, esp_simd_memset, d, 0x5a, SIZE);
+	RUN3("memmove", memmove, esp_simd_memmove, d, a, SIZE);
+	RUN3("memchr", memchr, esp_simd_memchr, a, 0, SIZE);
+	RUN3("memrchr", memrchr, esp_simd_memrchr, a, '!', SIZE);
+	RUN3("memcmp", memcmp, esp_simd_memcmp, a, b, SIZE);
+	RUN1("strlen", strlen, esp_simd_strlen, (char *)a);
+	RUN2("strnlen", strnlen, esp_simd_strnlen, (char *)a, SIZE);
+	RUN2("strchrnul", strchrnul, esp_simd_strchrnul, (char *)a, '!');
+	RUN2("strchr", strchr, esp_simd_strchr, (char *)a, '!');
+	RUN2("strcmp", strcmp, esp_simd_strcmp, (char *)a, (char *)b);
+	RUN2("stpcpy", stpcpy, esp_simd_stpcpy, (char *)d, (char *)a);
+	RUN2("strcpy", strcpy, esp_simd_strcpy, (char *)d, (char *)a);
+	RUN3("stpncpy", stpncpy, esp_simd_stpncpy, (char *)d, (char *)a, SIZE);
+	RUN3("strncpy", strncpy, esp_simd_strncpy, (char *)d, (char *)a, SIZE);
+	RUN4("memccpy", memccpy, esp_simd_memccpy, d, a, 0, SIZE);
 	/* strlcpy has the same three-argument shape as memcpy for the macro. */
-	RUN3("strlcpy", strlcpy, s31_xespv_strlcpy, (char *)d, (char *)a, SIZE);
+	RUN3("strlcpy", strlcpy, esp_simd_strlcpy, (char *)d, (char *)a, SIZE);
 	free(d); free(b); free(a);
 	return sink == ~(uintptr_t)0;
 }

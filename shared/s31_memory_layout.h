@@ -6,9 +6,13 @@
 #define S31_PSRAM_BASE                 0x50000000U
 #define S31_PSRAM_SIZE                 0x01000000U
 
-/* OpenSBI owns only the final 64-KiB PSRAM MMU page. */
-#define S31_OPENSBI_RW_BASE            0x50FF0000U
-#define S31_OPENSBI_RW_SIZE            0x00010000U
+/* OpenSBI text/rodata execute directly from the U-Boot FIT's NOR mapping.
+ * U-Boot replaces the old IDF factory app, so its former low-SRAM working
+ * area is free after SPL hands off.  Keep only .data/.bss, two 4-KiB hart
+ * stacks and a 16-KiB heap here, leaving the old 96-KiB radio low heap whole. */
+#define S31_OPENSBI_RW_BASE            0x2F00F000U
+#define S31_OPENSBI_RW_END             0x2F018000U
+#define S31_OPENSBI_RW_SIZE            (S31_OPENSBI_RW_END - S31_OPENSBI_RW_BASE)
 
 /* Linux S-mode owns this complete Wi-Fi/BT area.  Blob allocations use the
  * heap portion; the tail is a synchronous-exception stack and guard area.
@@ -27,13 +31,10 @@
 #define S31_RADIO_EXC_BASE             S31_RADIO_HEAP_END
 #define S31_RADIO_EXC_END              0x2F072380U
 
-/* Reclaimed parked factory-app FreeRTOS heap as a second (low) blob heap
- * chunk.  The factory app keeps 0x2f00ea30..0x2f018000 (~37 KiB) for its
- * boot-time flash-mapping/PSRAM setup; everything above is idle once hart0
- * parks in WFI.  This region is explicitly reserved and cleared by the
- * loader before Linux starts (see clear_sram_for_linux()), unlike the earlier
- * low-chunk experiment which left stale FreeRTOS heap data in the D-cache. */
-#define S31_RADIO_HEAP_LOW_BASE        0x2F018000U
+/* The original IDF path reclaimed this parked factory-app FreeRTOS heap as a
+ * second (low) blob heap chunk.  Under U-Boot there is no resident factory
+ * app, and OpenSBI occupies only the immediately preceding 36 KiB. */
+#define S31_RADIO_HEAP_LOW_BASE        S31_OPENSBI_RW_END
 #define S31_RADIO_HEAP_LOW_END         0x2F030000U
 #define S31_RADIO_HEAP_LOW_SIZE        (S31_RADIO_HEAP_LOW_END - S31_RADIO_HEAP_LOW_BASE)
 
@@ -78,8 +79,8 @@
 #error "UART DMA region must end at the shared reservation boundary"
 #endif
 
-#if S31_OPENSBI_RW_BASE + S31_OPENSBI_RW_SIZE != S31_PSRAM_BASE + S31_PSRAM_SIZE
-#error "OpenSBI must occupy the final PSRAM MMU page"
+#if S31_OPENSBI_RW_BASE + S31_OPENSBI_RW_SIZE != S31_RADIO_HEAP_LOW_BASE
+#error "OpenSBI and the low radio heap must be contiguous"
 #endif
 
 #endif /* S31_MEMORY_LAYOUT_H */

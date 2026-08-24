@@ -4,6 +4,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "esp_simd.h"
+
 #define BUFFER_SIZE (512U * 1024U)
 #define TOTAL_BYTES (32U * 1024U * 1024U)
 
@@ -165,6 +167,12 @@ int main(void)
 	static const size_t sizes[] = { 64, 256, 1024, 16384, 262144, 524288 };
 	unsigned char *src, *scalar, *vector;
 	size_t index;
+
+	if (esp_simd_init()) {
+		perror("esp_simd_init");
+		return 1;
+	}
+	printf("XespV benchmark affinity: CPU%d\n", esp_simd_cpu());
 
 	if (posix_memalign((void **)&src, 64, BUFFER_SIZE) ||
 	    posix_memalign((void **)&scalar, 64, BUFFER_SIZE) ||

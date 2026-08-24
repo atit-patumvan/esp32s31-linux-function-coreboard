@@ -7,6 +7,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "esp_simd.h"
+
 extern uint32_t s31_fpu_add(uint32_t a, uint32_t b);
 extern void s31_fpu_all(uint32_t *out, const uint32_t *input);
 extern uint32_t s31_fpu_hold_yield(uint32_t value);
@@ -255,6 +257,7 @@ static int all_pie_instruction_tests(void)
 {
 	static unsigned char scratch[4096] __attribute__((aligned(4096)));
 	unsigned int failures = 0;
+	unsigned int expected_unsupported = 0;
 	unsigned int index;
 
 	for (index = 0; index < ARRAY_SIZE(pie_case_names); index++) {
@@ -274,7 +277,13 @@ static int all_pie_instruction_tests(void)
 			perror("PIE waitpid");
 			return -1;
 		}
-		if (!WIFEXITED(status) || WEXITSTATUS(status)) {
+		if (WIFSIGNALED(status) && WTERMSIG(status) == SIGILL &&
+		    index == 270) {
+			fprintf(stderr,
+				"Xespv[%u] expected SIGILL on S31 rev0.0: %s\n",
+				index, pie_case_names[index]);
+			expected_unsupported++;
+		} else if (!WIFEXITED(status) || WEXITSTATUS(status)) {
 			if (WIFSIGNALED(status))
 				fprintf(stderr,
 					"Xespv[%u] signal %d: %s\n", index,
@@ -294,8 +303,9 @@ static int all_pie_instruction_tests(void)
 			failures, (unsigned int)ARRAY_SIZE(pie_case_names));
 		return -1;
 	}
-	printf("Xespv: all %u instruction forms PASS\n",
-	       (unsigned int)ARRAY_SIZE(pie_case_names));
+	printf("Xespv: %u/%u instruction forms PASS, %u expected silicon exception\n",
+	       (unsigned int)ARRAY_SIZE(pie_case_names) - expected_unsupported,
+	       (unsigned int)ARRAY_SIZE(pie_case_names), expected_unsupported);
 	return 0;
 }
 
@@ -348,6 +358,12 @@ int main(void)
 	int status;
 	int instruction_failures;
 	unsigned int i;
+
+	if (esp_simd_init()) {
+		perror("esp_simd_init");
+		return 1;
+	}
+	printf("XespV test affinity: CPU%d\n", esp_simd_cpu());
 
 	if (basic_tests())
 		return 1;

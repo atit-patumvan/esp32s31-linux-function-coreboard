@@ -10,6 +10,7 @@
 
 	.macro FUNC name
 	.global \name
+	.hidden \name
 	.type \name,@function
 \name:
 	.endm
@@ -805,5 +806,40 @@ FUNC s31_xespv_strlcpy
 	addi sp,sp,32
 	ret
 END s31_xespv_strlcpy
+
+/* Saturating unsigned byte add, matching esp.vadd.u8 hardware semantics. */
+FUNC s31_xespv_add_sat_u8
+	/* The 128-bit path requires all three pointers to be 16-byte aligned. */
+	or t0,a0,a1
+	or t0,t0,a2
+	andi t0,t0,15
+	bnez t0,.Lva_byte
+.Lva_vec:
+	li t0,16
+	bltu a3,t0,.Lva_byte
+	esp.vld.128.ip q0,a1,16
+	esp.vld.128.ip q1,a2,16
+	esp.vadd.u8 q2,q0,q1
+	esp.vst.128.ip q2,a0,16
+	addi a3,a3,-16
+	j .Lva_vec
+.Lva_byte:
+	beqz a3,.Lva_done
+	lbu t0,0(a1)
+	lbu t1,0(a2)
+	add t0,t0,t1
+	sltiu t1,t0,256
+	bnez t1,.Lva_store
+	li t0,255
+.Lva_store:
+	sb t0,0(a0)
+	addi a0,a0,1
+	addi a1,a1,1
+	addi a2,a2,1
+	addi a3,a3,-1
+	j .Lva_byte
+.Lva_done:
+	ret
+END s31_xespv_add_sat_u8
 
 	.section .note.GNU-stack,"",@progbits

@@ -35,6 +35,11 @@ extern wifi_osi_funcs_t *g_osi_funcs_p;
 extern int32_t psa_crypto_init(void);
 #ifdef S31_LINUX_SMODE
 #define S31_PERIPH_WIFI_MODULE 5
+/* ESP-IDF calls this from esp_rtc_init() before its system-init table.  The
+ * U-Boot -> Linux path intentionally skips IDF startup, but the modem power
+ * domain (in particular the BLE register aperture at 0x2010b000) still
+ * depends on the PMU active-state programming performed here. */
+extern void pmu_init(void);
 
 void s31_radio_wifi_clock_enable(void)
 {
@@ -50,6 +55,7 @@ extern void s31_radio_heap_report(const char *stage);
 extern void s31_radio_report_wifi_init(int result);
 extern void s31_radio_report_bt_init(int result);
 extern void s31_radio_report_bt_enable(int result);
+extern void s31_radio_report_bt_disable(int result);
 extern void s31_radio_vhci_send_available(void);
 extern int s31_radio_vhci_receive(uint8_t *frame, uint16_t length);
 struct s31_wifi_ap {
@@ -792,6 +798,7 @@ void s31_radio_stack_task(void *arg)
 	int rc;
 
 	(void)arg;
+	pmu_init();
 	/* Keep blob logging out of the ROM UART busy-poll path: every ESP_LOG
 	 * line serializes the gate hold behind 115200-baud output and was the
 	 * measured cause of the multi-hundred-ms Wi-Fi queue-receive hold. */
@@ -934,5 +941,23 @@ void s31_radio_bt_enable_task(void *arg)
 	s31_radio_report_bt_enable(rc);
 	s31_radio_heap_report("after-bt-enable");
 	#endif
+#endif
+}
+
+void s31_radio_bt_disable_task(void *arg)
+{
+#ifdef S31_WIFI_ONLY
+	(void)arg;
+#else
+	int rc;
+
+	(void)arg;
+	s31_rtos_use_internal_stacks();
+	rc = esp_bt_controller_disable();
+	s31_linux_printf("[S31] esp_bt_controller_disable rc=%d\n", rc);
+#ifdef S31_LINUX_SMODE
+	s31_radio_heap_report("after-bt-disable");
+	s31_radio_report_bt_disable(rc);
+#endif
 #endif
 }

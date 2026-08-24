@@ -63,28 +63,32 @@ jobs:
           make TOOLCHAIN_RELEASE_TAG="$TOOLCHAIN_RELEASE_TAG" \
             IDF_EXPORT="$IDF_PATH/export.sh" all
           make TOOLCHAIN_RELEASE_TAG="$TOOLCHAIN_RELEASE_TAG" coremark
-          make TOOLCHAIN_RELEASE_TAG="$TOOLCHAIN_RELEASE_TAG" \
-            IDF_EXPORT="$IDF_PATH/export.sh" bootloader
 
       - name: Verify release images
         run: |
           set -ex
           echo "=== Build Artifacts ==="
-          ls -lh build/fw_payload.bin build/xipImage build/rootfs.sqfs
-          ls -lh bootloader/build/bootloader/bootloader.bin 2>/dev/null || echo "WARN: bootloader.bin missing"
-          ls -lh bootloader/build/hello_world.bin 2>/dev/null || echo "WARN: hello_world.bin missing"
-          echo "=== sdkconfig ==="
-          grep -E 'CONFIG_ESPTOOLPY_FLASHMODE|CONFIG_FLASHMODE' bootloader/sdkconfig || echo "WARN: flash mode config not in sdkconfig"
+          ls -lh \
+            build/spl_app.bin \
+            build/u-boot.itb \
+            build/esp32s31_generic.dtb \
+            build/xipImage \
+            build/rootfs.sqfs \
+            build/s31_full_flash.bin \
+            build/coremark/coremark.exe
           echo "=== esptool ==="
           source "$IDF_PATH/export.sh"
-          esptool version 2>/dev/null || echo "WARN: esptool not in IDF env"
-          esptool --chip esp32s31 image-info \
-            bootloader/build/bootloader/bootloader.bin 2>&1 | head -5 || echo "WARN: esptool image-info failed"
+          esptool version
+          esptool --chip esp32s31 image-info build/spl_app.bin
           echo "=== Core checks ==="
-          test -s build/fw_payload.bin
+          test -s build/spl_app.bin
+          test -s build/u-boot.itb
+          test -s build/esp32s31_generic.dtb
           test -s build/xipImage
           test -s build/rootfs.sqfs
-          grep -q '^CONFIG_ESP32S31_COPROC_CONTEXT=y$' build/linux/.config
+          test -s build/s31_full_flash.bin
+          test -s build/coremark/coremark.exe
+          grep -q '^CONFIG_ESP32S31_COPROC_CONTEXT=y$' build/linux-6.18/.config
           "$GITHUB_WORKSPACE/toolchain/riscv32-esp-linux-musl/bin/riscv32-esp-linux-musl-objdump" \
             -d build/buildroot/target/usr/lib/libc.so > build/release-libc-disassembly.txt
           ! grep -q 'esp\.' build/release-libc-disassembly.txt
@@ -106,15 +110,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_TITLE: ${{ steps.release.outputs.title }}
-          FLASH_COMMAND: esptool -p /dev/ttyUSB0 -b 2000000 erase-flash && esptool -p /dev/ttyUSB0 -b 2000000 write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB 0x2000 bootloader.bin 0x8000 partition-table.bin 0x20000 hello_world.bin 0x220000 fw_payload.bin 0x400000 xipImage 0xA00000 rootfs.sqfs
+          FLASH_COMMAND: esptool -p /dev/ttyUSB0 -b 2000000 erase-flash && esptool -p /dev/ttyUSB0 -b 2000000 write-flash --flash-mode dio --flash-freq 80m --flash-size 16MB 0x0 s31_full_flash.bin
         run: |
           gh release create "$RELEASE_TAG" \
-            build/fw_payload.bin \
+            build/s31_full_flash.bin \
+            build/spl_app.bin \
+            build/u-boot.itb \
+            build/esp32s31_generic.dtb \
             build/xipImage \
             build/rootfs.sqfs \
-            build/esp32s31_generic.dtb \
-            bootloader/build/bootloader/bootloader.bin \
-            bootloader/build/partition_table/partition-table.bin \
-            bootloader/build/hello_world.bin \
+            build/coremark/coremark.exe \
             --title "$RELEASE_TITLE" \
             --notes "$FLASH_COMMAND"

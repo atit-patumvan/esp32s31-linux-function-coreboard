@@ -8,7 +8,7 @@ S31_TOOLS_VERSION = 1.0
 S31_TOOLS_SITE = $(BR2_EXTERNAL_ESP32_S31_PATH)/../rootfs
 S31_TOOLS_SITE_METHOD = local
 S31_TOOLS_LICENSE = GPL-2.0-only
-S31_TOOLS_DEPENDENCIES = dtc
+S31_TOOLS_DEPENDENCIES = dtc esp-simd
 S31_TOOLS_EXT_CFLAGS = -march=rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs_xesploop_xespv2p2 -mespv-spec=2p2
 
 define S31_TOOLS_BUILD_CMDS
@@ -24,18 +24,17 @@ define S31_TOOLS_BUILD_CMDS
 		-o $(@D)/s31_ext_test.o
 	$(TARGET_CC) $(TARGET_CFLAGS) $(S31_TOOLS_EXT_CFLAGS) $(TARGET_LDFLAGS) \
 		$(@D)/s31_ext_test.c $(@D)/s31_ext_test.o \
-		-o $(@D)/s31-ext-test
+		-L$(STAGING_DIR)/usr/lib -lesp-simd -o $(@D)/s31-ext-test
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) \
 		-fno-builtin-memcpy -fno-builtin-memset \
 		-fno-builtin-memmove $(@D)/s31_libc_test.c \
 		-o $(@D)/s31-libc-test
 	$(TARGET_CC) $(TARGET_CFLAGS) $(S31_TOOLS_EXT_CFLAGS) $(TARGET_LDFLAGS) \
-		$(@D)/s31_mem_compare.c -o $(@D)/s31-mem-compare
-	$(TARGET_CC) $(TARGET_CFLAGS) $(S31_TOOLS_EXT_CFLAGS) -c $(@D)/s31_xespv_memops.S \
-		-o $(@D)/s31_xespv_memops.o
-	$(TARGET_CC) $(TARGET_CFLAGS) $(S31_TOOLS_EXT_CFLAGS) $(TARGET_LDFLAGS) -fno-builtin \
-		$(@D)/s31_string_bench.c $(@D)/s31_xespv_memops.o \
-		-o $(@D)/s31-string-bench
+		$(@D)/s31_mem_compare.c -L$(STAGING_DIR)/usr/lib -lesp-simd \
+		-o $(@D)/s31-mem-compare
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) -fno-builtin \
+		$(@D)/s31_string_bench.c -I$(STAGING_DIR)/usr/include \
+		-L$(STAGING_DIR)/usr/lib -lesp-simd -o $(@D)/s31-string-bench
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_LDFLAGS) \
 		-I$(STAGING_DIR)/usr/include \
 		$(@D)/s31_overlay.c -lfdt -o $(@D)/s31-overlay

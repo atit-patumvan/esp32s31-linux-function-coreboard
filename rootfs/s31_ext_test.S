@@ -284,7 +284,9 @@ s31_bitmanip_all:
 	 * Every generated case is exactly one 32-bit PIE instruction plus RET,
 	 * therefore the dispatcher uses index * 8.  The generated corpus uses
 	 * q0..q7, s1 as the scratch base and a0 as a zero byte offset; no case
-	 * can clobber ra, sp or t0.
+	 * can clobber ra, sp or t0.  Initialise every q register before entering
+	 * the corpus: indexed loads/stores consume a q register as their offset
+	 * vector, so inherited process state is not a safe test fixture.
 	 */
 	.globl s31_pie_run_one
 	.type s31_pie_run_one, @function
@@ -299,6 +301,15 @@ s31_pie_run_one:
 	mv	s0, a1
 	li	t1, 2048
 	add	s1, s0, t1
+	mv	a0, s0
+	.word	0x0311001f	/* esp.vld.128.ip q0,a0,0 */
+	.word	0x0311041f	/* esp.vld.128.ip q1,a0,0 */
+	.word	0x0311081f	/* esp.vld.128.ip q2,a0,0 */
+	.word	0x03110c1f	/* esp.vld.128.ip q3,a0,0 */
+	.word	0x0311101f	/* esp.vld.128.ip q4,a0,0 */
+	.word	0x0311141f	/* esp.vld.128.ip q5,a0,0 */
+	.word	0x0311181f	/* esp.vld.128.ip q6,a0,0 */
+	.word	0x03111c1f	/* esp.vld.128.ip q7,a0,0 */
 	li	a0, 0		/* zero byte index for every .xp form */
 	jalr	ra, t0, 0
 	lw	s1, 4(sp)

@@ -1,0 +1,6 @@
+config BR2_PACKAGE_ESP_SIMD
+	bool "ESP32-S31 XespV SIMD library"
+	default y
+	help
+	  Installs libesp-simd, an explicit XespV 2.2 SIMD API.  The library
+	  pins each calling thread to hart 1 before any XespV instruction runs.
