@@ -21,7 +21,6 @@ mount -t devpts devpts /dev/pts 2>/dev/null || true
 # root while the overlay is assembled, then expose it at /persist after the
 # pivot. Identify persist by its ESP-IDF label, not a fixed MTD number.
 persist_dev=""
-persist_flags=""
 for _try in $(seq 1 50); do
 	for name_path in /sys/class/mtd/mtd*/name; do
 		[ -r "$name_path" ] || continue
@@ -30,7 +29,6 @@ for _try in $(seq 1 50); do
 		mtd_name="${mtd_name%/name}"
 		if [ -b "/dev/mtdblock${mtd_name}" ]; then
 			persist_dev="/dev/mtdblock${mtd_name}"
-			persist_flags="/sys/class/mtd/mtd${mtd_name}/flags"
 			break 2
 		fi
 	done
@@ -40,22 +38,6 @@ done
 if [ -z "$persist_dev" ]; then
 	echo "S31 overlay: persist MTD block device not found" >&2
 	exec /sbin/init
-fi
-
-# Linux and OpenSBI execute directly from this NOR.  The official S31 port
-# exposes it as mtd-rom; when the local driver does the same, do not start a
-# JFFS2 GC thread or try to use it as an overlay upper.  Keep only explicitly
-# volatile paths writable and continue from the immutable SquashFS root.
-if [ -r "$persist_flags" ]; then
-	flags=$(( $(cat "$persist_flags") ))
-	if [ $((flags & 0x400)) -eq 0 ]; then
-		echo "S31 overlay: persist MTD is read-only; using immutable root"
-		mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run 2>/dev/null || true
-		mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp 2>/dev/null || true
-		mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /var/log 2>/dev/null || true
-		mkdir -p /run/lock /run/bluetooth /run/seedrng
-		exec /sbin/init
-	fi
 fi
 
 # /mnt is part of the immutable root, so use a temporary mount there for the
