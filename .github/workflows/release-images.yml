@@ -16,7 +16,7 @@ jobs:
       IDF_PATH: ${{ github.workspace }}/.esp-idf
       ESP_IDF_REF: a602e67b0bf9ee0806dc4e1df7afc9affedf5c33
       TOOLCHAIN_RELEASE_TAG: esp32s31-linux-gcc-15.2.0-5
-      TOOLCHAIN_BUILD_ID: esp-16.0.0_00000000.32-8c983cc
+      TOOLCHAIN_BUILD_ID: esp-16.0.0_00000000.33-d799a78
 
     steps:
       - name: Check out source and submodules
