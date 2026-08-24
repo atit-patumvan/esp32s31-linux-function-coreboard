@@ -298,13 +298,14 @@ coremark: rootfs | $(COREMARK_OUT)
 ROOTFS_PARTITION_SIZE ?= 4194304
 PERSIST_PARTITION_SIZE ?= 1048576
 BUILDROOT_MAKE = $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_OUT) \
-	BR2_EXTERNAL=$(BUILDROOT_EXTERNAL) BR2_DL_DIR=$(BUILDROOT_DL_DIR)
+	BR2_EXTERNAL=$(BUILDROOT_EXTERNAL) BR2_DL_DIR=$(BUILDROOT_DL_DIR) \
+	S31_DTBO_DIR=$(LINUX_OUT)/arch/riscv/boot/dts/espressif
 
 s31-pie-cases:
 	@$(MAKE) --no-print-directory idf-check
 	bash -c "source $(IDF_EXPORT) >/dev/null && $(CURDIR)/rootfs/gen_s31_pie_cases.sh $(CURDIR)/rootfs/s31_pie_cases.inc"
 
-rootfs: toolchain s31-pie-cases | $(BUILDROOT_OUT)
+rootfs: linux toolchain s31-pie-cases | $(BUILDROOT_OUT)
 	@echo "--- Buildroot rootfs ---"
 	$(BUILDROOT_MAKE) esp32s31_rootfs_defconfig
 	$(BUILDROOT_MAKE) toolchain-external-custom-rebuild

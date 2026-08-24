@@ -51,7 +51,7 @@ ln -s /run/resolv.conf "${target_dir}/etc/resolv.conf"
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 project_dir="$(CDPATH= cd -- "${script_dir}/../../.." && pwd)"
-dtbo_dir="${project_dir}/build/linux/arch/riscv/boot/dts/espressif"
+dtbo_dir="${S31_DTBO_DIR:-${project_dir}/build/linux-6.18/arch/riscv/boot/dts/espressif}"
 install_dir="${target_dir}/usr/lib/s31-overlays"
 
 mkdir -p "${install_dir}"
