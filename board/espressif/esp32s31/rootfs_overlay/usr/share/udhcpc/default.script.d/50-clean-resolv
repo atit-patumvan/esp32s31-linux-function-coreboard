@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# BusyBox nslookup treats an inline comment as part of the server address.
+# Keep resolv.conf simple on this single-interface board.
+case "$1" in
+	deconfig)
+		: > /etc/resolv.conf
+		;;
+	bound|renew)
+		: > /etc/resolv.conf
+		if [ -n "$search" ]; then
+			echo "search $search" >> /etc/resolv.conf
+		elif [ -n "$domain" ]; then
+			echo "search $domain" >> /etc/resolv.conf
+		fi
+		for server in $dns; do
+			echo "nameserver $server" >> /etc/resolv.conf
+		done
+		;;
+esac

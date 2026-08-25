@@ -1,5 +1,13 @@
 # ESP32-S31 Buildroot External Tree
 
+> **Community project**: This is an independent extension of Espressif's
+> developer-preview `esp-buildroot-external` branch. It is not an official
+> Espressif release.
+>
+> **Tested hardware**: ESP32-S31 Function-CoreBoard-1 with its onboard YT8531
+> Gigabit Ethernet PHY. DHCP, DNS, Internet connectivity, and NTP were verified
+> at a 1000 Mb/s full-duplex link.
+
 > **⚠️ Espressif Integration**: This repository provides Buildroot integration and configurations for ESP32S31.
 > **⚠️ Developer Preview**: This branch (`buildroot/v2025.02-esp32s31`) is currently in developer preview and is **not yet recommended for production use**.  
 > For branch strategy and maintenance policy, see the [Branch Strategy](#branch-strategy) section below.
@@ -63,8 +71,41 @@ offset `0x0`:
 Use a lower baud rate, such as `460800`, if the serial connection is unstable.
 After flashing, open the console at 115200 baud:
 
+```sh
+screen /dev/cu.usbserial-10 115200
+```
+
 Successful boot reaches a root shell after the SPL, OpenSBI, U-Boot, Linux,
 and root filesystem have started.
+
+## Ethernet networking
+
+The Function-CoreBoard Ethernet port starts automatically as `eth0` and uses
+DHCP. After a default route is available, `ntpd` synchronizes against
+`0.pool.ntp.org` and `1.pool.ntp.org`. The image includes `ip`, `ifconfig`,
+`route`, `ping`, `nslookup`, `netstat`, `wget`, `ethtool`, `tcpdump`, `ntpd`,
+and `udhcpc`.
+
+Useful checks from the serial console are:
+
+```sh
+ip -4 addr show eth0
+ip route
+cat /etc/resolv.conf
+ethtool eth0
+ping -c 3 1.1.1.1
+nslookup pool.ntp.org
+date -u
+```
+
+The ESP32-S31 GMAC cannot reliably transmit Linux socket buffers directly
+from PSRAM. The board patch therefore uses the reserved internal DMA pool as
+a coherent transmit bounce buffer.
+
+No board-specific MAC address is published in this tree. Unless the
+bootloader supplies a valid address, Linux generates a locally administered
+address at boot. For a stable DHCP identity, add your own unique
+`local-mac-address` to the GMAC device-tree node.
 
 ---
 

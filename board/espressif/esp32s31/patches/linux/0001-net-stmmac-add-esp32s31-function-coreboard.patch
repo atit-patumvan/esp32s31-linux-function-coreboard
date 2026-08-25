@@ -1,0 +1,436 @@
+From 6b9aa8be29f35c871794103a66b25dd2ebd10ed0 Mon Sep 17 00:00:00 2001
+From: Atit Patumvan <20349610+atit-patumvan@users.noreply.github.com>
+Date: Tue, 25 Aug 2026 16:00:00 +0700
+Subject: [PATCH] net: stmmac: add ESP32-S31 Function-CoreBoard support
+
+Wire the ESP32-S31 DesignWare GMAC to stmmac, configure its RGMII and
+SMI pin routing, clock divider, reset the onboard YT8531 PHY, and describe
+the Function-CoreBoard Ethernet hardware in the minimal device tree.  Add
+an option to keep the shared Rx/Tx PBL mode required by the S31 DMA.
+
+---
+ arch/riscv/boot/dts/espressif/esp32s31.dts    |  51 ++++
+ .../ethernet/stmicro/stmmac/dwmac1000_dma.c   |  11 +-
+ drivers/net/ethernet/stmicro/stmmac/Kconfig   |  11 +
+ drivers/net/ethernet/stmicro/stmmac/Makefile  |   1 +
+ .../ethernet/stmicro/stmmac/dwmac-esp32s31.c  | 263 ++++++++++++++++++
+ include/linux/stmmac.h                        |   1 +
+ 6 files changed, 335 insertions(+), 3 deletions(-)
+ create mode 100644 drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c
+
+diff --git a/arch/riscv/boot/dts/espressif/esp32s31.dts b/arch/riscv/boot/dts/espressif/esp32s31.dts
+index 97c74e4e12f1..ee0000000001 100644
+--- a/arch/riscv/boot/dts/espressif/esp32s31.dts
++++ b/arch/riscv/boot/dts/espressif/esp32s31.dts
+@@ -20,6 +20,7 @@ / {
+ 
+ 	aliases {
+ 		serial0 = &uart0;
++		ethernet0 = &gmac;
+ 	};
+ 
+ 	xtal_clk: clock-xtal {
+@@ -28,6 +29,24 @@ xtal_clk: clock-xtal {
+ 		clock-frequency = <40000000>;
+ 	};
+ 
++	gmac_clk: clock-gmac {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <80000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
++
++		gmac_dma_pool: dma-pool@2f030000 {
++			compatible = "shared-dma-pool";
++			reg = <0x2f030000 0x00010000>;
++			no-map;
++		};
++	};
++
+ 	chosen {
+ 		bootargs = "earlycon=sbi console=ttyS0 root=mtd:rootfs rootfstype=cramfs ro";
+ 	};
+@@ -107,6 +126,38 @@ systimer: timer@20399000 {
+ 			interrupt-names = "target0";
+ 		};
+ 
++		gmac: ethernet@20350000 {
++			compatible = "espressif,esp32s31-dwmac";
++			reg = <0x20350000 0x2000>;
++			interrupt-parent = <&intmtx>;
++			interrupts = <98 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "macirq";
++			clocks = <&gmac_clk>;
++			clock-names = "stmmaceth";
++			memory-region = <&gmac_dma_pool>;
++			phy-mode = "rgmii-id";
++			phy-handle = <&phy0>;
++			espressif,mpll-frequency = <500000000>;
++			snps,pbl = <16>;
++			snps,no-pbl-x8;
++			snps,mixed-burst;
++			snps,aal;
++			status = "okay";
++
++			mdio {
++				compatible = "snps,dwmac-mdio";
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				phy0: ethernet-phy@0 {
++					compatible = "ethernet-phy-ieee802.3-c22";
++					reg = <0>;
++					rx-internal-delay-ps = <1900>;
++					tx-internal-delay-ps = <1950>;
++				};
++			};
++		};
++
+ 		rootflash: flash@40b00000 {
+ 			compatible = "mtd-rom";
+ 			reg = <0x40b00000 0x00400000>;
+diff --git a/drivers/net/ethernet/stmicro/stmmac/Kconfig b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+index 111111111111..ee0000000002 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/Kconfig
++++ b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+@@ -58,6 +58,17 @@ config DWMAC_GENERIC
+ 	  platform specific code to function or is using platform
+ 	  data for setup.
+ 
++config DWMAC_ESP32S31
++	tristate "Espressif ESP32-S31 DWMAC support"
++	default y if SOC_ESP32S31
++	depends on OF && RISCV
++	select MOTORCOMM_PHY
++	help
++	  Support the Synopsys DesignWare GMAC in the Espressif ESP32-S31.
++	  The glue driver configures the SoC RGMII clock, dedicated pin routing,
++	  SMI GPIO matrix signals, and the PHY reset used by the ESP32-S31
++	  Function-CoreBoard.
++
+ config DWMAC_ANARION
+ 	tristate "Adaptrum Anarion GMAC support"
+ 	default ARC
+diff --git a/drivers/net/ethernet/stmicro/stmmac/Makefile b/drivers/net/ethernet/stmicro/stmmac/Makefile
+index 111111111111..ee0000000003 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/Makefile
++++ b/drivers/net/ethernet/stmicro/stmmac/Makefile
+@@ -17,6 +17,7 @@ stmmac-$(CONFIG_STMMAC_SELFTESTS) += stmmac_selftests.o
+ 
+ # Ordering matters. Generic driver must be last.
+ obj-$(CONFIG_STMMAC_PLATFORM)	+= stmmac-platform.o
++obj-$(CONFIG_DWMAC_ESP32S31)	+= dwmac-esp32s31.o
+ obj-$(CONFIG_DWMAC_ANARION)	+= dwmac-anarion.o
+ obj-$(CONFIG_DWMAC_INGENIC)	+= dwmac-ingenic.o
+ obj-$(CONFIG_DWMAC_IPQ806X)	+= dwmac-ipq806x.o
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c
+new file mode 100644
+index 000000000000..ee0000000004
+--- /dev/null
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c
+@@ -0,0 +1,263 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* ESP32-S31 DesignWare GMAC glue for the Function-CoreBoard. */
++
++#include <linux/bitfield.h>
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_reserved_mem.h>
++#include <linux/phy.h>
++#include <linux/platform_device.h>
++#include <linux/stmmac.h>
++
++#include "stmmac_platform.h"
++
++#define ESP32S31_CNNT_SYS_BASE		0x20359000
++#define ESP32S31_IOMUX_BASE		0x20582000
++#define ESP32S31_GPIO_BASE		0x20583000
++#define ESP32S31_CLKRST_BASE		0x20587000
++#define ESP32S31_CNNT_PAD_BASE		0x20588000
++
++#define CNNT_HP_EMAC_CTRL		0x3c
++#define CNNT_HP_EMAC_REF_CTRL		0x40
++#define CNNT_HP_RMII_PAD_CTRL		0x44
++#define CNNT_HP_RMII_CTRL		0x48
++#define CNNT_HP_RMII_RX_CTRL		0x4c
++#define CNNT_HP_RMII_TX_CTRL		0x50
++#define CNNT_HP_GMAC_CTRL0		0x60
++
++#define CLKRST_SOC_EMAC_CTRL0		0xc8
++#define CNNT_PAD_EXT_CTRL		0x3f4
++
++#define GPIO_OUT_W1TS			0x008
++#define GPIO_OUT_W1TC			0x00c
++#define GPIO_ENABLE_W1TS		0x038
++#define GPIO_FUNC_IN_SEL_CFG(n)		(0x2f4 + ((n) * 4))
++#define GPIO_FUNC_OUT_SEL_CFG(n)	(0xaf4 + ((n) * 4))
++
++#define IOMUX_MCU_SEL			GENMASK(14, 12)
++#define IOMUX_INPUT_ENABLE		BIT(9)
++#define IOMUX_PULLDOWN			BIT(8)
++#define IOMUX_PULLUP			BIT(7)
++
++#define GMAC_PHY_INTF_SEL		GENMASK(4, 2)
++#define EMAC_REF_DIV			GENMASK(15, 8)
++
++#define ESP32S31_MPLL_DEFAULT_HZ	500000000U
++#define ESP32S31_DMA_CONTROL		0x1018
++#define ESP32S31_DMA_CONTROL_OSF	BIT(2)
++
++struct esp32s31_dwmac {
++	void __iomem *gmac;
++	void __iomem *cnnt;
++	void __iomem *iomux;
++	void __iomem *gpio;
++	void __iomem *clkrst;
++	void __iomem *cnnt_pad;
++	u32 mpll_hz;
++};
++
++static void esp32s31_rmw(void __iomem *base, u32 reg, u32 clear, u32 set)
++{
++	u32 value = readl(base + reg);
++
++	value &= ~clear;
++	value |= set;
++	writel(value, base + reg);
++}
++
++static void esp32s31_iomux_pin(struct esp32s31_dwmac *dwmac, unsigned int pin,
++			       unsigned int function, bool input)
++{
++	u32 value = readl(dwmac->iomux + pin * 4);
++
++	value &= ~(IOMUX_MCU_SEL | IOMUX_INPUT_ENABLE |
++		   IOMUX_PULLDOWN | IOMUX_PULLUP);
++	value |= FIELD_PREP(IOMUX_MCU_SEL, function);
++	if (input)
++		value |= IOMUX_INPUT_ENABLE;
++	writel(value, dwmac->iomux + pin * 4);
++}
++
++static void esp32s31_setup_pins(struct esp32s31_dwmac *dwmac)
++{
++	unsigned int pin;
++
++	/* RGMII TXD[3:0], TX_CTL and TX_CLK use dedicated function 2. */
++	for (pin = 8; pin <= 13; pin++)
++		esp32s31_iomux_pin(dwmac, pin, 2, true);
++
++	/* RGMII RX_CLK, RX_CTL and RXD[3:0] use dedicated function 2. */
++	for (pin = 14; pin <= 19; pin++)
++		esp32s31_iomux_pin(dwmac, pin, 2, true);
++
++	/* Select the dedicated GMAC pads for GPIO13 through GPIO19. */
++	esp32s31_rmw(dwmac->cnnt_pad, CNNT_PAD_EXT_CTRL, 0, BIT(1));
++
++	/* Route MDC on GPIO5 and bidirectional MDIO on GPIO6. */
++	esp32s31_iomux_pin(dwmac, 5, 1, false);
++	esp32s31_iomux_pin(dwmac, 6, 1, true);
++	writel(108, dwmac->gpio + GPIO_FUNC_OUT_SEL_CFG(5));
++	writel(109, dwmac->gpio + GPIO_FUNC_OUT_SEL_CFG(6));
++	writel(6 | BIT(9), dwmac->gpio + GPIO_FUNC_IN_SEL_CFG(107));
++}
++
++static void esp32s31_reset_phy(struct esp32s31_dwmac *dwmac)
++{
++	/* The Function-CoreBoard connects the active-low PHY reset to GPIO7. */
++	esp32s31_iomux_pin(dwmac, 7, 1, false);
++	writel(BIT(7), dwmac->gpio + GPIO_ENABLE_W1TS);
++	writel(BIT(7), dwmac->gpio + GPIO_OUT_W1TC);
++	usleep_range(1000, 2000);
++	writel(BIT(7), dwmac->gpio + GPIO_OUT_W1TS);
++	msleep(100);
++}
++
++static void esp32s31_set_ref_clock(struct esp32s31_dwmac *dwmac,
++				   unsigned long rate)
++{
++	u32 div;
++
++	if (!rate || dwmac->mpll_hz < rate)
++		return;
++
++	div = DIV_ROUND_CLOSEST(dwmac->mpll_hz, rate) - 1;
++	div = min_t(u32, div, FIELD_MAX(EMAC_REF_DIV));
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_EMAC_REF_CTRL,
++		      EMAC_REF_DIV | GENMASK(1, 0),
++		      FIELD_PREP(EMAC_REF_DIV, div) | BIT(2));
++}
++
++static void esp32s31_fix_mac_speed(void *priv, int speed, unsigned int mode)
++{
++	struct esp32s31_dwmac *dwmac = priv;
++
++	/* Match the S31 HAL: process a second frame in cut-through mode. */
++	esp32s31_rmw(dwmac->gmac, ESP32S31_DMA_CONTROL, 0,
++		      ESP32S31_DMA_CONTROL_OSF);
++
++	switch (speed) {
++	case SPEED_1000:
++		esp32s31_set_ref_clock(dwmac, 125000000);
++		break;
++	case SPEED_100:
++		esp32s31_set_ref_clock(dwmac, 25000000);
++		break;
++	case SPEED_10:
++		esp32s31_set_ref_clock(dwmac, 2500000);
++		break;
++	default:
++		break;
++	}
++}
++
++static void esp32s31_setup_gmac(struct esp32s31_dwmac *dwmac)
++{
++	/* Enable the GMAC bus clock and release its connectivity reset. */
++	esp32s31_rmw(dwmac->clkrst, CLKRST_SOC_EMAC_CTRL0, 0, BIT(0));
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_EMAC_CTRL, 0, BIT(1));
++	udelay(2);
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_EMAC_CTRL, BIT(1), 0);
++
++	/* Select RGMII and route its pad clocks as required by the S31 HAL. */
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_GMAC_CTRL0,
++		      GMAC_PHY_INTF_SEL, FIELD_PREP(GMAC_PHY_INTF_SEL, 1));
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_RMII_PAD_CTRL,
++		      BIT(2) | BIT(1), 0);
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_RMII_CTRL,
++		      GENMASK(12, 8) | BIT(1) | BIT(0), BIT(2));
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_RMII_RX_CTRL,
++		      BIT(1), BIT(3) | BIT(2) | BIT(0));
++	esp32s31_rmw(dwmac->cnnt, CNNT_HP_RMII_TX_CTRL,
++		      BIT(2) | BIT(1) | BIT(0), BIT(3));
++
++	esp32s31_set_ref_clock(dwmac, 125000000);
++	esp32s31_setup_pins(dwmac);
++	esp32s31_reset_phy(dwmac);
++}
++
++static int esp32s31_dwmac_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct plat_stmmacenet_data *plat;
++	struct stmmac_resources res;
++	struct esp32s31_dwmac *dwmac;
++	int ret;
++
++	ret = stmmac_get_platform_resources(pdev, &res);
++	if (ret)
++		return ret;
++
++	plat = devm_stmmac_probe_config_dt(pdev, res.mac);
++	if (IS_ERR(plat))
++		return PTR_ERR(plat);
++
++	dwmac = devm_kzalloc(dev, sizeof(*dwmac), GFP_KERNEL);
++	if (!dwmac)
++		return -ENOMEM;
++
++	dwmac->gmac = res.addr;
++	dwmac->cnnt = devm_ioremap(dev, ESP32S31_CNNT_SYS_BASE, 0x100);
++	dwmac->iomux = devm_ioremap(dev, ESP32S31_IOMUX_BASE, 0x100);
++	dwmac->gpio = devm_ioremap(dev, ESP32S31_GPIO_BASE, 0xe00);
++	dwmac->clkrst = devm_ioremap(dev, ESP32S31_CLKRST_BASE, 0x100);
++	dwmac->cnnt_pad = devm_ioremap(dev, ESP32S31_CNNT_PAD_BASE, 0x400);
++	if (!dwmac->cnnt || !dwmac->iomux || !dwmac->gpio || !dwmac->clkrst ||
++	    !dwmac->cnnt_pad)
++		return -ENOMEM;
++
++	if (of_property_read_u32(dev->of_node, "espressif,mpll-frequency",
++				 &dwmac->mpll_hz))
++		dwmac->mpll_hz = ESP32S31_MPLL_DEFAULT_HZ;
++
++	if (plat->phy_interface != PHY_INTERFACE_MODE_RGMII_ID)
++		return dev_err_probe(dev, -EINVAL, "phy-mode must be rgmii-id\n");
++
++	ret = of_reserved_mem_device_init(dev);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to attach GMAC DMA pool\n");
++
++	esp32s31_setup_gmac(dwmac);
++
++	plat->bsp_priv = dwmac;
++	plat->fix_mac_speed = esp32s31_fix_mac_speed;
++	plat->has_gmac = true;
++	plat->enh_desc = true;
++	plat->clk_csr = STMMAC_CSR_60_100M;
++	plat->force_thresh_dma_mode = true;
++	plat->force_sf_dma_mode = false;
++	plat->max_speed = SPEED_1000;
++	plat->tx_fifo_size = 1024;
++	plat->rx_fifo_size = 256;
++	if (plat->dma_cfg) {
++		plat->dma_cfg->pbl = 16;
++		plat->dma_cfg->no_rxpbl = true;
++		plat->dma_cfg->mixed_burst = true;
++		plat->dma_cfg->aal = true;
++		plat->dma_cfg->atds = true;
++	}
++
++	return devm_stmmac_pltfr_probe(pdev, plat, &res);
++}
++
++static const struct of_device_id esp32s31_dwmac_match[] = {
++	{ .compatible = "espressif,esp32s31-dwmac" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, esp32s31_dwmac_match);
++
++static struct platform_driver esp32s31_dwmac_driver = {
++	.probe = esp32s31_dwmac_probe,
++	.driver = {
++		.name = "esp32s31-dwmac",
++		.pm = &stmmac_pltfr_pm_ops,
++		.of_match_table = esp32s31_dwmac_match,
++	},
++};
++module_platform_driver(esp32s31_dwmac_driver);
++
++MODULE_DESCRIPTION("ESP32-S31 DesignWare GMAC glue driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c
+index 111111111111..ee0000000005 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c
+@@ -87,10 +87,15 @@ static void dwmac1000_dma_init_channel(struct stmmac_priv *priv,
+ 	 */
+ 	if (dma_cfg->pblx8)
+ 		value |= DMA_BUS_MODE_MAXPBL;
+-	value |= DMA_BUS_MODE_USP;
+-	value &= ~(DMA_BUS_MODE_PBL_MASK | DMA_BUS_MODE_RPBL_MASK);
++	value &= ~DMA_BUS_MODE_PBL_MASK;
+ 	value |= (txpbl << DMA_BUS_MODE_PBL_SHIFT);
+-	value |= (rxpbl << DMA_BUS_MODE_RPBL_SHIFT);
++	if (dma_cfg->no_rxpbl) {
++		value &= ~DMA_BUS_MODE_USP;
++	} else {
++		value |= DMA_BUS_MODE_USP;
++		value &= ~DMA_BUS_MODE_RPBL_MASK;
++		value |= (rxpbl << DMA_BUS_MODE_RPBL_SHIFT);
++	}
+ 
+ 	/* Set the Fixed burst mode */
+ 	if (dma_cfg->fixed_burst)
+diff --git a/include/linux/stmmac.h b/include/linux/stmmac.h
+index 111111111111..ee0000000006 100644
+--- a/include/linux/stmmac.h
++++ b/include/linux/stmmac.h
+@@ -97,6 +97,7 @@ struct stmmac_dma_cfg {
+ 	int txpbl;
+ 	int rxpbl;
+ 	bool pblx8;
++	bool no_rxpbl;
+ 	int fixed_burst;
+ 	int mixed_burst;
+ 	bool aal;
+-- 
+2.50.1

@@ -1,0 +1,174 @@
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-esp32s31.c
+@@ -224,6 +224,7 @@ static int esp32s31_dwmac_probe(struct platform_device *pdev)
+ 
+ 	plat->bsp_priv = dwmac;
+ 	plat->fix_mac_speed = esp32s31_fix_mac_speed;
++	plat->tx_coherent_bounce = true;
+ 	plat->has_gmac = true;
+ 	plat->enh_desc = true;
+ 	plat->clk_csr = STMMAC_CSR_60_100M;
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac.h b/drivers/net/ethernet/stmicro/stmmac/stmmac.h
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac.h
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac.h
+@@ -40,6 +40,7 @@ struct stmmac_resources {
+ 
+ enum stmmac_txbuf_type {
+ 	STMMAC_TXBUF_T_SKB,
++	STMMAC_TXBUF_T_SKB_COHERENT,
+ 	STMMAC_TXBUF_T_XDP_TX,
+ 	STMMAC_TXBUF_T_XDP_NDO,
+ 	STMMAC_TXBUF_T_XSK_TX,
+@@ -47,6 +48,7 @@ enum stmmac_txbuf_type {
+ 
+ struct stmmac_tx_info {
+ 	dma_addr_t buf;
++	void *coherent_buf;
+ 	bool map_as_page;
+ 	unsigned len;
+ 	bool last_segment;
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+@@ -1527,7 +1527,13 @@ static void stmmac_free_tx_buffer(struct stmmac_priv *priv,
+ 
+ 	if (tx_q->tx_skbuff_dma[i].buf &&
+ 	    tx_q->tx_skbuff_dma[i].buf_type != STMMAC_TXBUF_T_XDP_TX) {
+-		if (tx_q->tx_skbuff_dma[i].map_as_page)
++		if (tx_q->tx_skbuff_dma[i].buf_type ==
++		    STMMAC_TXBUF_T_SKB_COHERENT)
++			dma_free_coherent(priv->device,
++					  tx_q->tx_skbuff_dma[i].len,
++					  tx_q->tx_skbuff_dma[i].coherent_buf,
++					  tx_q->tx_skbuff_dma[i].buf);
++		else if (tx_q->tx_skbuff_dma[i].map_as_page)
+ 			dma_unmap_page(priv->device,
+ 				       tx_q->tx_skbuff_dma[i].buf,
+ 				       tx_q->tx_skbuff_dma[i].len,
+@@ -1550,12 +1556,14 @@ static void stmmac_free_tx_buffer(struct stmmac_priv *priv,
+ 		tx_q->xsk_frames_done++;
+ 
+ 	if (tx_q->tx_skbuff[i] &&
+-	    tx_q->tx_skbuff_dma[i].buf_type == STMMAC_TXBUF_T_SKB) {
++	    (tx_q->tx_skbuff_dma[i].buf_type == STMMAC_TXBUF_T_SKB ||
++	     tx_q->tx_skbuff_dma[i].buf_type == STMMAC_TXBUF_T_SKB_COHERENT)) {
+ 		dev_kfree_skb_any(tx_q->tx_skbuff[i]);
+ 		tx_q->tx_skbuff[i] = NULL;
+ 	}
+ 
+ 	tx_q->tx_skbuff_dma[i].buf = 0;
++	tx_q->tx_skbuff_dma[i].coherent_buf = NULL;
+ 	tx_q->tx_skbuff_dma[i].map_as_page = false;
+ }
+ 
+@@ -1828,6 +1836,7 @@ static int __init_dma_tx_desc_rings(struct stmmac_priv *priv,
+ 		stmmac_clear_desc(priv, p);
+ 
+ 		tx_q->tx_skbuff_dma[i].buf = 0;
++		tx_q->tx_skbuff_dma[i].coherent_buf = NULL;
+ 		tx_q->tx_skbuff_dma[i].map_as_page = false;
+ 		tx_q->tx_skbuff_dma[i].len = 0;
+ 		tx_q->tx_skbuff_dma[i].last_segment = false;
+@@ -2674,7 +2683,9 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue,
+ 		    tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_XDP_NDO) {
+ 			xdpf = tx_q->xdpf[entry];
+ 			skb = NULL;
+-		} else if (tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_SKB) {
++		} else if (tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_SKB ||
++			   tx_q->tx_skbuff_dma[entry].buf_type ==
++			   STMMAC_TXBUF_T_SKB_COHERENT) {
+ 			xdpf = NULL;
+ 			skb = tx_q->tx_skbuff[entry];
+ 		} else {
+@@ -2728,7 +2739,13 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue,
+ 
+ 		if (likely(tx_q->tx_skbuff_dma[entry].buf &&
+ 			   tx_q->tx_skbuff_dma[entry].buf_type != STMMAC_TXBUF_T_XDP_TX)) {
+-			if (tx_q->tx_skbuff_dma[entry].map_as_page)
++			if (tx_q->tx_skbuff_dma[entry].buf_type ==
++			    STMMAC_TXBUF_T_SKB_COHERENT)
++				dma_free_coherent(priv->device,
++						  tx_q->tx_skbuff_dma[entry].len,
++						  tx_q->tx_skbuff_dma[entry].coherent_buf,
++						  tx_q->tx_skbuff_dma[entry].buf);
++			else if (tx_q->tx_skbuff_dma[entry].map_as_page)
+ 				dma_unmap_page(priv->device,
+ 					       tx_q->tx_skbuff_dma[entry].buf,
+ 					       tx_q->tx_skbuff_dma[entry].len,
+@@ -2739,6 +2756,7 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue,
+ 						 tx_q->tx_skbuff_dma[entry].len,
+ 						 DMA_TO_DEVICE);
+ 			tx_q->tx_skbuff_dma[entry].buf = 0;
++			tx_q->tx_skbuff_dma[entry].coherent_buf = NULL;
+ 			tx_q->tx_skbuff_dma[entry].len = 0;
+ 			tx_q->tx_skbuff_dma[entry].map_as_page = false;
+ 		}
+@@ -2763,7 +2781,9 @@ static int stmmac_tx_clean(struct stmmac_priv *priv, int budget, u32 queue,
+ 		if (tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_XSK_TX)
+ 			tx_q->xsk_frames_done++;
+ 
+-		if (tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_SKB) {
++		if (tx_q->tx_skbuff_dma[entry].buf_type == STMMAC_TXBUF_T_SKB ||
++		    tx_q->tx_skbuff_dma[entry].buf_type ==
++		    STMMAC_TXBUF_T_SKB_COHERENT) {
+ 			if (likely(skb)) {
+ 				pkts_compl++;
+ 				bytes_compl += skb->len;
+@@ -4517,6 +4537,14 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
+ 			return stmmac_tso_xmit(skb, dev);
+ 	}
+ 
++	/* Coherent bounce mode needs one contiguous buffer per frame. */
++	if (priv->plat->tx_coherent_bounce && nfrags) {
++		if (skb_linearize(skb))
++			goto dma_map_err;
++		nfrags = 0;
++		nopaged_len = skb_headlen(skb);
++	}
++
+ 	if (priv->est && priv->est->enable &&
+ 	    priv->est->max_sdu[queue]) {
+ 		sdu_len = skb->len;
+@@ -4696,14 +4724,25 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
+ 	 */
+ 	if (likely(!is_jumbo)) {
+ 		bool last_segment = (nfrags == 0);
++		void *coherent_buf = NULL;
+ 
+-		des = dma_map_single(priv->device, skb->data,
+-				     nopaged_len, DMA_TO_DEVICE);
+-		if (dma_mapping_error(priv->device, des))
+-			goto dma_map_err;
++		if (priv->plat->tx_coherent_bounce && !nfrags) {
++			coherent_buf = dma_alloc_coherent(priv->device, nopaged_len,
++						    &des, GFP_ATOMIC);
++			if (!coherent_buf)
++				goto dma_map_err;
++			memcpy(coherent_buf, skb->data, nopaged_len);
++		} else {
++			des = dma_map_single(priv->device, skb->data,
++					     nopaged_len, DMA_TO_DEVICE);
++			if (dma_mapping_error(priv->device, des))
++				goto dma_map_err;
++		}
+ 
+ 		tx_q->tx_skbuff_dma[first_entry].buf = des;
+-		tx_q->tx_skbuff_dma[first_entry].buf_type = STMMAC_TXBUF_T_SKB;
++		tx_q->tx_skbuff_dma[first_entry].coherent_buf = coherent_buf;
++		tx_q->tx_skbuff_dma[first_entry].buf_type = coherent_buf ?
++			STMMAC_TXBUF_T_SKB_COHERENT : STMMAC_TXBUF_T_SKB;
+ 		tx_q->tx_skbuff_dma[first_entry].map_as_page = false;
+ 
+ 		stmmac_set_desc_addr(priv, first, des);
+diff --git a/include/linux/stmmac.h b/include/linux/stmmac.h
+--- a/include/linux/stmmac.h
++++ b/include/linux/stmmac.h
+@@ -229,6 +229,7 @@ struct plat_stmmacenet_data {
+ 	int pmt;
+ 	int force_sf_dma_mode;
+ 	int force_thresh_dma_mode;
++	bool tx_coherent_bounce;
+ 	int riwt_off;
+ 	int max_speed;
+ 	int maxmtu;

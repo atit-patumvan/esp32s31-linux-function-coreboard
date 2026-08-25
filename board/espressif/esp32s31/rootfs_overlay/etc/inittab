@@ -1,11 +1,12 @@
-# Minimal ESP32-S31 bring-up inittab: interactive shell on the console
-# (getty -n -l runs /bin/sh directly, no login prompt), no rcS services.
+# Minimal ESP32-S31 bring-up inittab: interactive shell on the console.
+# Run rcS so networking, DHCP, NTP, and the normal Buildroot services start.
 # / is a read-only cramfs from the flash XIP window (root=mtd:rootfs) — no
 # remount,rw. mount -a brings up the fstab mounts (proc, sysfs, and the tmpfs
 # for /tmp + /run); the skeleton's /var/* symlinks point into those tmpfs.
 # /dev is a kernel-mounted devtmpfs (CONFIG_DEVTMPFS_MOUNT); no /dev/pts or
 # /dev/shm needed (no pty/POSIX-shm clients in this rootfs).
 ::sysinit:/bin/mount -a
+::sysinit:/etc/init.d/rcS
 console::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r
