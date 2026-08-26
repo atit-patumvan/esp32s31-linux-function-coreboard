@@ -101,7 +101,7 @@ The Function-CoreBoard Ethernet port starts automatically as `eth0` and uses
 DHCP. After a default route is available, `ntpd` synchronizes against
 `0.pool.ntp.org` and `1.pool.ntp.org`. The image includes `ip`, `ifconfig`,
 `route`, `ping`, `nslookup`, `netstat`, `wget`, `ethtool`, `tcpdump`, `ntpd`,
-and `udhcpc`.
+`udhcpc`, and the beginner-friendly `pico`/`nano` text editor.
 
 Useful checks from the serial console are:
 
