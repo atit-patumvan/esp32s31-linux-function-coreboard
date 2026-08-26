@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Nano is Pico-compatible and considerably easier for new users than vi.
+exec /usr/bin/nano "$@"
