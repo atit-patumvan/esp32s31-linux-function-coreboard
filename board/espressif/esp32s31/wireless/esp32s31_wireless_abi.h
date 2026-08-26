@@ -74,23 +74,33 @@ struct s31_wireless_ring_state {
 	s31_u8 consumer_pad[S31_WIRELESS_CACHELINE_SIZE - sizeof(s31_u32)];
 };
 
+struct s31_wireless_firmware_state {
+	volatile s31_u32 ready;
+	volatile s31_u32 heartbeat;
+	volatile s31_u32 generation;
+	volatile s31_u32 features;
+	volatile s31_u32 link_state;
+	volatile s31_u32 errors;
+	s31_u8 sta_mac[6];
+	s31_u8 bt_mac[6];
+	s31_u8 reserved0[28];
+};
+
+struct s31_wireless_linux_state {
+	volatile s31_u32 ready;
+	volatile s31_u32 heartbeat;
+	volatile s31_u32 errors;
+	s31_u8 reserved0[52];
+};
+
 struct s31_wireless_control {
 	s31_u32 magic;
 	s31_u16 abi_version;
 	s31_u16 control_size;
 	s31_u32 region_size;
-	s31_u32 features;
-	volatile s31_u32 firmware_ready;
-	volatile s31_u32 linux_ready;
-	volatile s31_u32 generation;
-	volatile s31_u32 firmware_heartbeat;
-	volatile s31_u32 linux_heartbeat;
-	volatile s31_u32 link_state;
-	volatile s31_u32 firmware_errors;
-	volatile s31_u32 linux_errors;
-	s31_u8 sta_mac[6];
-	s31_u8 bt_mac[6];
-	s31_u8 reserved0[12];
+	s31_u8 reserved0[S31_WIRELESS_CACHELINE_SIZE - 12U];
+	struct s31_wireless_firmware_state firmware;
+	struct s31_wireless_linux_state host;
 	struct s31_wireless_ring_state firmware_to_linux;
 	struct s31_wireless_ring_state linux_to_firmware;
 };
@@ -115,6 +125,10 @@ struct s31_wireless_slot {
 
 _Static_assert(sizeof(struct s31_wireless_ring_state) == 128,
 	       "wireless ring state must occupy two cache lines");
+_Static_assert(sizeof(struct s31_wireless_firmware_state) == 64,
+	       "firmware state must occupy one cache line");
+_Static_assert(sizeof(struct s31_wireless_linux_state) == 64,
+	       "Linux state must occupy one cache line");
 _Static_assert(sizeof(struct s31_wireless_control) <= S31_WIRELESS_CONTROL_SIZE,
 	       "wireless control block exceeds its reservation");
 _Static_assert(sizeof(struct s31_wireless_slot) == S31_WIRELESS_SLOT_SIZE,

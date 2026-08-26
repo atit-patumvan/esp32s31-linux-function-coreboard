@@ -18,6 +18,16 @@ select a region that does not overlap its stack, OpenSBI, Linux, GMAC DMA, ROM
 work areas or ESP-IDF heaps. It then publishes the same region through the
 Linux device tree.
 
+For the Function-CoreBoard profile, `esp32s31_wireless_layout.h` assigns the
+existing GMAC DMA pool to `0x2f030000..0x2f040000` and the wireless transport
+to `0x2f040000..0x2f050000`. The ESP-IDF endpoint reserves both ranges from
+its heap. A Wi-Fi scan build was measured with static DIRAM ending at
+`0x2f01b0b0`, below both reservations.
+
+`firmware/` is a standalone ESP-IDF RF probe and the first implementation of
+the firmware heartbeat. It is useful for build and radio validation, but is
+not yet a Linux co-boot image.
+
 ## Bring-up gates
 
 1. Build and run `abi-layout-test.c` on the host.

@@ -1,0 +1,144 @@
+From b4fce89f1bd924c1834b5e7f03d66f7b4ec96aec Mon Sep 17 00:00:00 2001
+From: Atit Patumvan <patumvan.a@paw-partners.com>
+Date: Wed, 26 Aug 2026 22:13:15 +0700
+Subject: [PATCH] platform: esp32s31: map cache-safe wireless state
+
+---
+ arch/riscv/boot/dts/espressif/esp32s31.dts |  6 ++++
+ drivers/platform/esp32s31-wireless.c       | 26 ++++++++--------
+ include/linux/esp32s31-wireless.h          | 36 ++++++++++++++--------
+ 3 files changed, 43 insertions(+), 25 deletions(-)
+
+diff --git a/arch/riscv/boot/dts/espressif/esp32s31.dts b/arch/riscv/boot/dts/espressif/esp32s31.dts
+index 57f84256f..0ee504b74 100644
+--- a/arch/riscv/boot/dts/espressif/esp32s31.dts
++++ b/arch/riscv/boot/dts/espressif/esp32s31.dts
+@@ -101,6 +101,12 @@ systimer: timer@20399000 {
+ 			interrupt-names = "target0";
+ 		};
+ 
++		wireless: wireless@2f040000 {
++			compatible = "espressif,esp32s31-wireless";
++			reg = <0x2f040000 0x00010000>;
++			status = "okay";
++		};
++
+ 		rootflash: flash@40b00000 {
+ 			compatible = "mtd-rom";
+ 			reg = <0x40b00000 0x00400000>;
+diff --git a/drivers/platform/esp32s31-wireless.c b/drivers/platform/esp32s31-wireless.c
+index bb7918df1..1f953f145 100644
+--- a/drivers/platform/esp32s31-wireless.c
++++ b/drivers/platform/esp32s31-wireless.c
+@@ -35,12 +35,12 @@ static void s31_wireless_heartbeat(struct work_struct *work)
+ 
+ 	if (s31_wireless_abi_ready(wireless)) {
+ 		heartbeat = readl_relaxed(S31_CTRL_ADDR(wireless,
+-			linux_heartbeat));
++			host.heartbeat));
+ 		writel_relaxed(heartbeat + 1,
+-			S31_CTRL_ADDR(wireless, linux_heartbeat));
++			S31_CTRL_ADDR(wireless, host.heartbeat));
+ 		wmb();
+ 		writel_relaxed(S31_WIRELESS_ENDPOINT_READY,
+-			S31_CTRL_ADDR(wireless, linux_ready));
++			S31_CTRL_ADDR(wireless, host.ready));
+ 	}
+ 	schedule_delayed_work(&wireless->heartbeat_work, HZ);
+ }
+@@ -57,15 +57,15 @@ static ssize_t status_show(struct device *dev,
+ 		"linux_errors=%u\n",
+ 		s31_wireless_abi_ready(wireless),
+ 		readw_relaxed(S31_CTRL_ADDR(wireless, abi_version)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, features)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, firmware_ready)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, linux_ready)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, generation)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, firmware_heartbeat)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, linux_heartbeat)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, link_state)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, firmware_errors)),
+-		readl_relaxed(S31_CTRL_ADDR(wireless, linux_errors)));
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware.features)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware.ready)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, host.ready)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware.generation)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware.heartbeat)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, host.heartbeat)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware.link_state)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware.errors)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, host.errors)));
+ }
+ static DEVICE_ATTR_RO(status);
+ 
+@@ -103,7 +103,7 @@ static void s31_wireless_remove(struct platform_device *pdev)
+ 	cancel_delayed_work_sync(&wireless->heartbeat_work);
+ 	if (s31_wireless_abi_ready(wireless)) {
+ 		writel_relaxed(S31_WIRELESS_ENDPOINT_OFFLINE,
+-			S31_CTRL_ADDR(wireless, linux_ready));
++			S31_CTRL_ADDR(wireless, host.ready));
+ 		wmb();
+ 	}
+ 	device_remove_file(&pdev->dev, &dev_attr_status);
+diff --git a/include/linux/esp32s31-wireless.h b/include/linux/esp32s31-wireless.h
+index 21ad95ac2..db05be755 100644
+--- a/include/linux/esp32s31-wireless.h
++++ b/include/linux/esp32s31-wireless.h
+@@ -28,23 +28,33 @@ struct s31_wireless_ring_state {
+ 	u8 consumer_pad[S31_WIRELESS_CACHELINE_SIZE - sizeof(u32)];
+ };
+ 
++struct s31_wireless_firmware_state {
++	volatile u32 ready;
++	volatile u32 heartbeat;
++	volatile u32 generation;
++	volatile u32 features;
++	volatile u32 link_state;
++	volatile u32 errors;
++	u8 sta_mac[6];
++	u8 bt_mac[6];
++	u8 reserved0[28];
++};
++
++struct s31_wireless_linux_state {
++	volatile u32 ready;
++	volatile u32 heartbeat;
++	volatile u32 errors;
++	u8 reserved0[52];
++};
++
+ struct s31_wireless_control {
+ 	u32 magic;
+ 	u16 abi_version;
+ 	u16 control_size;
+ 	u32 region_size;
+-	u32 features;
+-	volatile u32 firmware_ready;
+-	volatile u32 linux_ready;
+-	volatile u32 generation;
+-	volatile u32 firmware_heartbeat;
+-	volatile u32 linux_heartbeat;
+-	volatile u32 link_state;
+-	volatile u32 firmware_errors;
+-	volatile u32 linux_errors;
+-	u8 sta_mac[6];
+-	u8 bt_mac[6];
+-	u8 reserved0[12];
++	u8 reserved0[S31_WIRELESS_CACHELINE_SIZE - 12U];
++	struct s31_wireless_firmware_state firmware;
++	struct s31_wireless_linux_state host;
+ 	struct s31_wireless_ring_state firmware_to_linux;
+ 	struct s31_wireless_ring_state linux_to_firmware;
+ };
+@@ -60,6 +70,8 @@ struct s31_wireless_slot {
+ };
+ 
+ static_assert(sizeof(struct s31_wireless_ring_state) == 128);
++static_assert(sizeof(struct s31_wireless_firmware_state) == 64);
++static_assert(sizeof(struct s31_wireless_linux_state) == 64);
+ static_assert(sizeof(struct s31_wireless_control) <= S31_WIRELESS_CONTROL_SIZE);
+ static_assert(sizeof(struct s31_wireless_slot) == S31_WIRELESS_SLOT_SIZE);
+ 
+-- 
+2.50.1 (Apple Git-155)
+
