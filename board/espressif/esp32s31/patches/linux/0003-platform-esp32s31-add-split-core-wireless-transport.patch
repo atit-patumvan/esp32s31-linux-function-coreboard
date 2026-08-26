@@ -1,0 +1,254 @@
+From e577e60efd63004921823fd9a2db06cfaef3d7af Mon Sep 17 00:00:00 2001
+From: Atit Patumvan <patumvan.a@paw-partners.com>
+Date: Wed, 26 Aug 2026 21:55:41 +0700
+Subject: [PATCH] platform: esp32s31: add split-core wireless transport
+
+---
+ drivers/platform/Kconfig             |   9 ++
+ drivers/platform/Makefile            |   1 +
+ drivers/platform/esp32s31-wireless.c | 129 +++++++++++++++++++++++++++
+ include/linux/esp32s31-wireless.h    |  66 ++++++++++++++
+ 4 files changed, 205 insertions(+)
+ create mode 100644 drivers/platform/esp32s31-wireless.c
+ create mode 100644 include/linux/esp32s31-wireless.h
+
+diff --git a/drivers/platform/Kconfig b/drivers/platform/Kconfig
+index 960fd6a82..bfbdd7369 100644
+--- a/drivers/platform/Kconfig
++++ b/drivers/platform/Kconfig
+@@ -1,4 +1,13 @@
+ # SPDX-License-Identifier: GPL-2.0-only
++config ESP32S31_WIRELESS_TRANSPORT
++	bool "ESP32-S31 split-core wireless transport"
++	depends on SOC_ESP32S31 && OF
++	help
++	  Map and validate the shared-memory ABI used by an ESP-IDF wireless
++	  service on the other ESP32-S31 hart. This transport core provides
++	  heartbeat and diagnostic state; Wi-Fi and Bluetooth front ends are
++	  layered on it separately.
++
+ source "drivers/platform/mips/Kconfig"
+ 
+ source "drivers/platform/loongarch/Kconfig"
+diff --git a/drivers/platform/Makefile b/drivers/platform/Makefile
+index 19ac54648..c7fe48838 100644
+--- a/drivers/platform/Makefile
++++ b/drivers/platform/Makefile
+@@ -3,6 +3,7 @@
+ # Makefile for linux/drivers/platform
+ #
+ 
++obj-$(CONFIG_ESP32S31_WIRELESS_TRANSPORT) += esp32s31-wireless.o
+ obj-$(CONFIG_X86)		+= x86/
+ obj-$(CONFIG_LOONGARCH)		+= loongarch/
+ obj-$(CONFIG_MELLANOX_PLATFORM)	+= mellanox/
+diff --git a/drivers/platform/esp32s31-wireless.c b/drivers/platform/esp32s31-wireless.c
+new file mode 100644
+index 000000000..bb7918df1
+--- /dev/null
++++ b/drivers/platform/esp32s31-wireless.c
+@@ -0,0 +1,129 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* ESP32-S31 split-core wireless shared-memory transport core. */
++
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/workqueue.h>
++
++#include <linux/esp32s31-wireless.h>
++
++struct s31_wireless {
++	void __iomem *base;
++	struct delayed_work heartbeat_work;
++};
++
++#define S31_CTRL_ADDR(_wireless, _member) \
++	((_wireless)->base + offsetof(struct s31_wireless_control, _member))
++
++static bool s31_wireless_abi_ready(struct s31_wireless *wireless)
++{
++	return readl_relaxed(S31_CTRL_ADDR(wireless, magic)) ==
++		S31_WIRELESS_MAGIC &&
++	       readw_relaxed(S31_CTRL_ADDR(wireless, abi_version)) ==
++		S31_WIRELESS_ABI_VERSION &&
++	       readl_relaxed(S31_CTRL_ADDR(wireless, region_size)) ==
++		S31_WIRELESS_REGION_SIZE;
++}
++
++static void s31_wireless_heartbeat(struct work_struct *work)
++{
++	struct s31_wireless *wireless = container_of(to_delayed_work(work),
++		struct s31_wireless, heartbeat_work);
++	u32 heartbeat;
++
++	if (s31_wireless_abi_ready(wireless)) {
++		heartbeat = readl_relaxed(S31_CTRL_ADDR(wireless,
++			linux_heartbeat));
++		writel_relaxed(heartbeat + 1,
++			S31_CTRL_ADDR(wireless, linux_heartbeat));
++		wmb();
++		writel_relaxed(S31_WIRELESS_ENDPOINT_READY,
++			S31_CTRL_ADDR(wireless, linux_ready));
++	}
++	schedule_delayed_work(&wireless->heartbeat_work, HZ);
++}
++
++static ssize_t status_show(struct device *dev,
++			   struct device_attribute *attribute, char *buf)
++{
++	struct s31_wireless *wireless = dev_get_drvdata(dev);
++
++	return sysfs_emit(buf,
++		"abi_ready=%u version=%u features=0x%08x firmware_ready=%u "
++		"linux_ready=%u generation=%u firmware_heartbeat=%u "
++		"linux_heartbeat=%u link=%u firmware_errors=%u "
++		"linux_errors=%u\n",
++		s31_wireless_abi_ready(wireless),
++		readw_relaxed(S31_CTRL_ADDR(wireless, abi_version)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, features)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware_ready)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, linux_ready)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, generation)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware_heartbeat)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, linux_heartbeat)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, link_state)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, firmware_errors)),
++		readl_relaxed(S31_CTRL_ADDR(wireless, linux_errors)));
++}
++static DEVICE_ATTR_RO(status);
++
++static int s31_wireless_probe(struct platform_device *pdev)
++{
++	struct s31_wireless *wireless;
++	struct resource *resource;
++	int error;
++
++	wireless = devm_kzalloc(&pdev->dev, sizeof(*wireless), GFP_KERNEL);
++	if (!wireless)
++		return -ENOMEM;
++	resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!resource || resource_size(resource) < S31_WIRELESS_REGION_SIZE)
++		return dev_err_probe(&pdev->dev, -EINVAL,
++			"shared-memory region is missing or smaller than 64 KiB\n");
++	wireless->base = devm_ioremap_resource(&pdev->dev, resource);
++	if (IS_ERR(wireless->base))
++		return PTR_ERR(wireless->base);
++
++	platform_set_drvdata(pdev, wireless);
++	INIT_DELAYED_WORK(&wireless->heartbeat_work, s31_wireless_heartbeat);
++	error = device_create_file(&pdev->dev, &dev_attr_status);
++	if (error)
++		return error;
++	schedule_delayed_work(&wireless->heartbeat_work, 0);
++	dev_info(&pdev->dev, "split-core wireless transport mapped\n");
++	return 0;
++}
++
++static void s31_wireless_remove(struct platform_device *pdev)
++{
++	struct s31_wireless *wireless = platform_get_drvdata(pdev);
++
++	cancel_delayed_work_sync(&wireless->heartbeat_work);
++	if (s31_wireless_abi_ready(wireless)) {
++		writel_relaxed(S31_WIRELESS_ENDPOINT_OFFLINE,
++			S31_CTRL_ADDR(wireless, linux_ready));
++		wmb();
++	}
++	device_remove_file(&pdev->dev, &dev_attr_status);
++}
++
++static const struct of_device_id s31_wireless_of_match[] = {
++	{ .compatible = "espressif,esp32s31-wireless" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, s31_wireless_of_match);
++
++static struct platform_driver s31_wireless_driver = {
++	.probe = s31_wireless_probe,
++	.remove = s31_wireless_remove,
++	.driver = {
++		.name = "esp32s31-wireless",
++		.of_match_table = s31_wireless_of_match,
++	},
++};
++module_platform_driver(s31_wireless_driver);
++
++MODULE_DESCRIPTION("ESP32-S31 split-core wireless transport core");
++MODULE_LICENSE("GPL");
+diff --git a/include/linux/esp32s31-wireless.h b/include/linux/esp32s31-wireless.h
+new file mode 100644
+index 000000000..21ad95ac2
+--- /dev/null
++++ b/include/linux/esp32s31-wireless.h
+@@ -0,0 +1,66 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0 */
++#ifndef _LINUX_ESP32S31_WIRELESS_H
++#define _LINUX_ESP32S31_WIRELESS_H
++
++#include <linux/bits.h>
++#include <linux/types.h>
++
++#define S31_WIRELESS_MAGIC             0x57313353U
++#define S31_WIRELESS_ABI_VERSION       1U
++#define S31_WIRELESS_REGION_SIZE       0x00010000U
++#define S31_WIRELESS_CONTROL_SIZE      0x00001000U
++#define S31_WIRELESS_CACHELINE_SIZE    64U
++#define S31_WIRELESS_SLOT_SIZE         2048U
++#define S31_WIRELESS_SLOT_COUNT        8U
++#define S31_WIRELESS_SLOT_DATA_SIZE    (S31_WIRELESS_SLOT_SIZE - 16U)
++
++#define S31_WIRELESS_FEAT_WIFI         BIT(0)
++#define S31_WIRELESS_FEAT_BLE          BIT(1)
++#define S31_WIRELESS_FEAT_BT_CLASSIC   BIT(2)
++#define S31_WIRELESS_FEAT_COEX         BIT(3)
++#define S31_WIRELESS_ENDPOINT_OFFLINE  0U
++#define S31_WIRELESS_ENDPOINT_READY    1U
++
++struct s31_wireless_ring_state {
++	volatile u32 producer;
++	u8 producer_pad[S31_WIRELESS_CACHELINE_SIZE - sizeof(u32)];
++	volatile u32 consumer;
++	u8 consumer_pad[S31_WIRELESS_CACHELINE_SIZE - sizeof(u32)];
++};
++
++struct s31_wireless_control {
++	u32 magic;
++	u16 abi_version;
++	u16 control_size;
++	u32 region_size;
++	u32 features;
++	volatile u32 firmware_ready;
++	volatile u32 linux_ready;
++	volatile u32 generation;
++	volatile u32 firmware_heartbeat;
++	volatile u32 linux_heartbeat;
++	volatile u32 link_state;
++	volatile u32 firmware_errors;
++	volatile u32 linux_errors;
++	u8 sta_mac[6];
++	u8 bt_mac[6];
++	u8 reserved0[12];
++	struct s31_wireless_ring_state firmware_to_linux;
++	struct s31_wireless_ring_state linux_to_firmware;
++};
++
++struct s31_wireless_slot {
++	u16 length;
++	u8 channel;
++	u8 flags;
++	u32 sequence;
++	u32 reserved0;
++	u32 reserved1;
++	u8 data[S31_WIRELESS_SLOT_DATA_SIZE];
++};
++
++static_assert(sizeof(struct s31_wireless_ring_state) == 128);
++static_assert(sizeof(struct s31_wireless_control) <= S31_WIRELESS_CONTROL_SIZE);
++static_assert(sizeof(struct s31_wireless_slot) == S31_WIRELESS_SLOT_SIZE);
++
++#endif
+-- 
+2.50.1 (Apple Git-155)
+

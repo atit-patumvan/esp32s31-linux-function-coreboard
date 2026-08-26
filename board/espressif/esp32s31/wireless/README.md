@@ -9,7 +9,9 @@ The intended ownership model is:
 - hart 1 runs Linux and owns Ethernet, IP networking and cloud services;
 - a reserved 64 KiB region carries control messages, Ethernet frames and,
   later, Bluetooth HCI packets;
-- the existing Ethernet-only Buildroot defconfig remains unchanged.
+- the existing Function-CoreBoard image keeps Ethernet as its active network
+  path while the wireless transport remains dormant without a device-tree
+  shared-memory node.
 
 The physical address is deliberately absent from the ABI. The bootloader must
 select a region that does not overlap its stack, OpenSBI, Linux, GMAC DMA, ROM

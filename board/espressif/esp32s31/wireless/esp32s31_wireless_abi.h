@@ -37,8 +37,8 @@ typedef uint32_t s31_u32;
 #define S31_WIRELESS_FEAT_BT_CLASSIC   (1U << 2)
 #define S31_WIRELESS_FEAT_COEX         (1U << 3)
 
-#define S31_WIRELESS_READY_FIRMWARE    (1U << 0)
-#define S31_WIRELESS_READY_LINUX       (1U << 1)
+#define S31_WIRELESS_ENDPOINT_OFFLINE  0U
+#define S31_WIRELESS_ENDPOINT_READY    1U
 
 enum s31_wireless_channel {
 	S31_WIRELESS_CH_CONTROL = 0,
@@ -80,7 +80,8 @@ struct s31_wireless_control {
 	s31_u16 control_size;
 	s31_u32 region_size;
 	s31_u32 features;
-	volatile s31_u32 ready;
+	volatile s31_u32 firmware_ready;
+	volatile s31_u32 linux_ready;
 	volatile s31_u32 generation;
 	volatile s31_u32 firmware_heartbeat;
 	volatile s31_u32 linux_heartbeat;
