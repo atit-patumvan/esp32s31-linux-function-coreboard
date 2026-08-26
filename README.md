@@ -107,6 +107,20 @@ bootloader supplies a valid address, Linux generates a locally administered
 address at boot. For a stable DHCP identity, add your own unique
 `local-mac-address` to the GMAC device-tree node.
 
+## Experimental split-core wireless
+
+Development on the `feature/wifi-core1` branch keeps the working Ethernet
+profile unchanged while adding an optional split-core wireless architecture.
+ESP-IDF/FreeRTOS owns Wi-Fi on one hart and Linux owns IP networking and cloud
+services on the other. A versioned shared-memory transport carries control
+messages and Ethernet frames; Bluetooth HCI will use a separate channel after
+Wi-Fi is stable.
+
+The transport ABI and bring-up gates are documented in
+`board/espressif/esp32s31/wireless/README.md`. This profile is not yet
+flashable and must not replace the Ethernet recovery image until its
+bootloader and memory reservations pass on-board validation.
+
 ---
 
 ## Branch Strategy
