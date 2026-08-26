@@ -78,6 +78,23 @@ screen /dev/cu.usbserial-10 115200
 Successful boot reaches a root shell after the SPL, OpenSBI, U-Boot, Linux,
 and root filesystem have started.
 
+### Backward-compatible rootfs update
+
+On a board already running the verified Function-CoreBoard bootloader and
+kernel, update only the cramfs slot to preserve that low-level boot stack:
+
+```sh
+<path-to-esptool> \
+  --chip esp32s31 \
+  --port <serial-port> \
+  --baud 115200 \
+  --no-stub write-flash \
+  0xC00000 <path-to-output-directory>/images/rootfs.cramfs
+```
+
+The `0xC00000` offset is specific to this NOR profile. Do not use it with a
+different partition layout.
+
 ## Ethernet networking
 
 The Function-CoreBoard Ethernet port starts automatically as `eth0` and uses
@@ -106,6 +123,27 @@ No board-specific MAC address is published in this tree. Unless the
 bootloader supplies a valid address, Linux generates a locally administered
 address at boot. For a stable DHCP identity, add your own unique
 `local-mac-address` to the GMAC device-tree node.
+
+## SSH access
+
+The Function-CoreBoard profile runs Dropbear on TCP port 22 and permits only
+public-key authentication for `root`. Replace
+`board/espressif/esp32s31/rootfs_overlay/root/.ssh/authorized_keys` with your
+own public key before distributing an image.
+
+For the local development board built from this checkout, connect with:
+
+```sh
+ssh -i ~/esp-linux/keys/esp32s31_ed25519 root@<board-ip>
+```
+
+On the tested board, TCP port 22 becomes available about 80 seconds after a
+cold boot, once the kernel random-number generator is ready. Both command
+execution and interactive PTY sessions are supported.
+
+Because the root filesystem is read-only, the SSH server generates an
+ephemeral host key in `/var/run` at every boot. Remove the old entry with
+`ssh-keygen -R <board-ip>` if the client reports that the host key changed.
 
 ## Experimental split-core wireless
 

@@ -1,0 +1,2 @@
+# Password authentication is compiled out; only public-key login is available.
+DROPBEAR_ARGS="-p 22"

@@ -1,0 +1,48 @@
+#!/bin/sh
+
+DAEMON=/usr/sbin/dropbear
+PIDFILE=/run/dropbear.pid
+SUPERVISOR_PIDFILE=/run/dropbear-supervisor.pid
+
+[ -r /etc/default/dropbear ] && . /etc/default/dropbear
+
+start() {
+	printf "Starting dropbear sshd: "
+	mkdir -p /run/dropbear
+	(
+		while [ "$(cat /proc/sys/kernel/random/entropy_avail 2>/dev/null || echo 0)" -lt 128 ]; do
+			sleep 1
+		done
+		exec "$DAEMON" -F -R -P "$PIDFILE" $DROPBEAR_ARGS
+	) &
+	echo $! > "$SUPERVISOR_PIDFILE"
+	echo "OK (waiting for kernel entropy)"
+}
+
+stop() {
+	printf "Stopping dropbear sshd: "
+	for pidfile in "$PIDFILE" "$SUPERVISOR_PIDFILE"; do
+		if [ -s "$pidfile" ]; then
+			kill "$(cat "$pidfile")" 2>/dev/null || true
+			rm -f "$pidfile"
+		fi
+	done
+	echo "OK"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		stop
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|reload}"
+		exit 1
+		;;
+esac
