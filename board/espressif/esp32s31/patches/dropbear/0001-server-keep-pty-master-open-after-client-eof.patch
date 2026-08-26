@@ -1,0 +1,47 @@
+From 8dfdc06f1c51b6d69e7e570582fac1416b16f39a Mon Sep 17 00:00:00 2001
+From: Atit Patumvan <20349610+atit-patumvan@users.noreply.github.com>
+Date: Wed, 26 Aug 2026 17:30:00 +0000
+Subject: [PATCH] server: keep PTY master open after client EOF
+
+The SSH channel uses a PTY master for both input and output. Give each
+direction its own descriptor so that an SSH_MSG_CHANNEL_EOF only closes the
+input descriptor. Otherwise closing the shared descriptor sends SIGHUP to
+the session child before it can execute when clients send EOF immediately
+after an exec request.
+
+This is especially visible with `ssh -t host command`, but can also affect
+interactive clients during early input shutdown.
+
+Signed-off-by: Atit Patumvan <20349610+atit-patumvan@users.noreply.github.com>
+---
+ src/svr-chansession.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/svr-chansession.c b/src/svr-chansession.c
+index 56d4fc8..ef3f089 100644
+--- a/src/svr-chansession.c
++++ b/src/svr-chansession.c
+@@ -801,0 +802 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
++	int writefd;
+@@ -817,0 +819,5 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
++	writefd = dup(chansess->master);
++	if (writefd < 0) {
++		return DROPBEAR_FAILURE;
++	}
++
+@@ -823,2 +830,4 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
+-	if (pid < 0)
+-		return DROPBEAR_FAILURE;
++	if (pid < 0) {
++		close(writefd);
++		return DROPBEAR_FAILURE;
++	}
+@@ -836,0 +846 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
++		close(writefd);
+@@ -908 +918 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
+-		channel->writefd = chansess->master;
++		channel->writefd = writefd;
+@@ -911,0 +922 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
++		ses.maxfd = MAX(ses.maxfd, writefd);
+--
+2.50.1
