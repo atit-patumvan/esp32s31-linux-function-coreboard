@@ -1,0 +1,54 @@
+diff --git a/package/ncurses/ncurses.mk b/package/ncurses/ncurses.mk
+index 5e2077500a..2fd73e103e 100644
+--- a/package/ncurses/ncurses.mk
++++ b/package/ncurses/ncurses.mk
+@@ -143,10 +143,18 @@ endif
+ 
+ define NCURSES_TARGET_CLEANUP_TERMINFO
+ 	$(RM) -rf $(TARGET_DIR)/usr/share/terminfo $(TARGET_DIR)/usr/share/tabset
+-	$(foreach t,$(NCURSES_TERMINFO_FILES), \
+-		$(INSTALL) -D -m 0644 $(STAGING_DIR)/usr/share/terminfo/$(t) \
+-			$(TARGET_DIR)/usr/share/terminfo/$(t)
+-	)
++	set -e; for t in $(NCURSES_TERMINFO_FILES); do \
++		rel="$$t"; \
++		if test ! -f "$(STAGING_DIR)/usr/share/terminfo/$$rel"; then \
++			initial="$${t%%/*}"; \
++			name="$${t#*/}"; \
++			hex=`printf '%x' "'$$initial"`; \
++			rel="$$hex/$$name"; \
++		fi; \
++		$(INSTALL) -D -m 0644 \
++			"$(STAGING_DIR)/usr/share/terminfo/$$rel" \
++			"$(TARGET_DIR)/usr/share/terminfo/$$rel"; \
++	done
+ endef
+ NCURSES_POST_INSTALL_TARGET_HOOKS += NCURSES_TARGET_CLEANUP_TERMINFO
+ 
+diff --git a/package/pkgconf/pkgconf.mk b/package/pkgconf/pkgconf.mk
+index 057f43bb98..7637e6acd3 100644
+--- a/package/pkgconf/pkgconf.mk
++++ b/package/pkgconf/pkgconf.mk
+@@ -40,6 +40,14 @@ define HOST_PKGCONF_SHARED
+ 	$(SED) 's,@STATIC@,,' $(HOST_DIR)/bin/pkg-config
+ endef
+ 
++# GNU sed replaces files on macOS bind mounts with the current umask, which
++# can drop the executable bit from the generated shell wrapper.  Restore the
++# declared mode after all substitutions so subsequent package configure steps
++# can invoke pkg-config reliably.
++define HOST_PKGCONF_FIX_WRAPPER_MODE
++	chmod 0755 $(HOST_DIR)/bin/pkg-config
++endef
++
+ PKGCONF_POST_INSTALL_TARGET_HOOKS += PKGCONF_LINK_PKGCONFIG
+ HOST_PKGCONF_POST_INSTALL_HOOKS += HOST_PKGCONF_INSTALL_WRAPPER
+ 
+@@ -48,6 +56,7 @@ HOST_PKGCONF_POST_INSTALL_HOOKS += HOST_PKGCONF_STATIC
+ else
+ HOST_PKGCONF_POST_INSTALL_HOOKS += HOST_PKGCONF_SHARED
+ endif
++HOST_PKGCONF_POST_INSTALL_HOOKS += HOST_PKGCONF_FIX_WRAPPER_MODE
+ 
+ $(eval $(autotools-package))
+ $(eval $(host-autotools-package))

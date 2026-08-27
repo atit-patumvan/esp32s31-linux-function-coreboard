@@ -1,0 +1,17 @@
+diff --git a/arch/riscv/kernel/vmlinux-xip.lds.S b/arch/riscv/kernel/vmlinux-xip.lds.S
+index b6862901b..d4aa4bbb7 100644
+--- a/arch/riscv/kernel/vmlinux-xip.lds.S
++++ b/arch/riscv/kernel/vmlinux-xip.lds.S
+@@ -51,7 +51,11 @@ SECTIONS
+ 		/* ESP-IDF marks latency-sensitive routines with target-specific IRAM
+ 		 * names.  They are executable code, so keep them in the XIP text image
+ 		 * instead of allowing orphan placement beside the SRAM data load. */
+-		*esp32s31-radio-idf.o(.iram1 .iram1.* .wifi*iram* .coexiram .coexiram.*)
++		/* ESP-IDF 6.2 also emits Bluetooth code under names such as
++		 * .iram_btslp.*, .iram_sleep_* and .critical_iram.*.  Match the
++		 * complete IRAM family so these executable sections cannot become
++		 * linker orphans at fixed LMAs between XIP text and rodata. */
++		*esp32s31-radio-idf.o(.iram* .critical_iram* .wifi*iram* .coexiram*)
+ 		/* The blob's read-only constants are XIP-able: keeping them out of
+ 		 * the small internal-SRAM heap frees ~82 KiB for RX/TX buffers. */
+ 		*esp32s31-radio-idf.o(.rodata* .srodata*)

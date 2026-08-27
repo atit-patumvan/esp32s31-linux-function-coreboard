@@ -60,11 +60,14 @@ IDF_ROOT ?= $(HOME)/.espressif
 # checkout is preferred, with an installed alternate accepted as a fallback.
 IDF_EXPORT ?= $(firstword $(wildcard $(IDF_ROOT)/master/esp-idf/export.sh) $(wildcard $(IDF_PATH)/export.sh) $(shell find $(IDF_ROOT) -maxdepth 5 -type f -path '*/esp-idf/export.sh' 2>/dev/null | sort | head -n 1))
 
-.PHONY: all download toolchain toolchain-source idf-check opensbi uboot flash-image radio-linux-payload radio-bootloader radio-image linux coremark rootfs initramfs s31-pie-cases layout-check \
+.PHONY: all prepare download toolchain toolchain-source idf-check opensbi uboot flash-image radio-linux-payload radio-bootloader radio-image linux coremark rootfs initramfs s31-pie-cases layout-check \
 	buildroot-menuconfig buildroot-clean clean fullclean flash-opensbi flash-linux \
 	flash-dtb flash-rootfs persist flash-persist bootloader flash-bootloader flash-all erase
 
 all: toolchain download uboot linux rootfs flash-image
+
+prepare:
+	$(CURDIR)/tools/apply_submodule_patches.sh
 
 $(BUILD_DIR) $(OPENSBI_OUT) $(LINUX_OUT) $(UBOOT_OUT) $(BUILDROOT_OUT) $(COREMARK_OUT):
 	mkdir -p $@
@@ -256,7 +259,7 @@ radio-linux-payload:
 			S31_WIFI_ONLY="$(S31_WIFI_ONLY)" linux-kbuild; \
 	fi
 
-linux: toolchain radio-linux-payload layout-check | $(LINUX_OUT)
+linux: prepare toolchain radio-linux-payload layout-check | $(LINUX_OUT)
 	@echo "--- Linux ---"
 	$(MAKE) -C $(LINUX_DIR) O=$(LINUX_OUT) ARCH=riscv CROSS_COMPILE="$(CROSS_COMPILE)" $(DEFCONFIG)
 	$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
