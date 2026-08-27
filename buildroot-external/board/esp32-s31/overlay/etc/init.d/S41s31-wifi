@@ -1,0 +1,19 @@
+#!/bin/sh
+
+case "$1" in
+	start)
+		[ -r /etc/s31-conf/wifi.conf ] || exit 0
+		(
+			tries=0
+			while [ ! -d /sys/class/net/wlan0 ]; do
+				tries=$((tries + 1))
+				[ "$tries" -ge 30 ] && exit 1
+				sleep 1
+			done
+			exec /usr/sbin/s31-wifi up
+		) &
+		;;
+	stop)
+		/usr/sbin/s31-wifi disconnect
+		;;
+esac

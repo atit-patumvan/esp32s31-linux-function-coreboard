@@ -1,0 +1,26 @@
+#!/bin/sh
+
+pidfile=/run/ntpd.pid
+
+case "$1" in
+	start)
+		(
+			tries=0
+			while ! ip route 2>/dev/null | grep -q '^default '; do
+				tries=$((tries + 1))
+				[ "$tries" -ge 60 ] && exit 1
+				sleep 1
+			done
+			exec ntpd -n -p 0.pool.ntp.org -p 1.pool.ntp.org
+		) &
+		echo $! >"$pidfile"
+		;;
+	stop)
+		[ -s "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null || true
+		rm -f "$pidfile"
+		;;
+	restart|reload)
+		"$0" stop
+		"$0" start
+		;;
+esac

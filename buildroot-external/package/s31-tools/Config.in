@@ -2,5 +2,4 @@ config BR2_PACKAGE_S31_TOOLS
 	bool "ESP32-S31 diagnostic tools"
 	default y
 	help
-	  Installs the ESP32-S31 MMU diagnostics, memory benchmark and
-	  Bluetooth scanner.
+	  Installs the compact Wi-Fi and Bluetooth management helpers.

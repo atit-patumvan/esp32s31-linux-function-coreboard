@@ -282,9 +282,6 @@ int main(int argc, char **argv)
 	if (mgmt_command(fd, MGMT_OP_STOP_DISCOVERY, 0,
 			 &discovery_type, 1))
 		perror("stop BLE discovery");
-	powered = 0;
-	if (mgmt_command(fd, MGMT_OP_SET_POWERED, 0, &powered, 1))
-		perror("power off Bluetooth controller");
 	printf("Found %zu unique BLE device%s\n", device_count,
 	       device_count == 1 ? "" : "s");
 	close(fd);

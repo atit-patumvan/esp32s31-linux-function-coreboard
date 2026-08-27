@@ -73,7 +73,10 @@ check_slot "$BASE_DTB" "$((SLOT_DTB))" "$((SLOT_KERNEL))"
 check_slot "$KERNEL_IMAGE" "$((SLOT_KERNEL))" "$((SLOT_PERSIST))"
 check_slot "$ROOTFS_IMAGE" "$((SLOT_ROOTFS))" "$((FLASH_SIZE))"
 
-# Persist is not merged: firmware images and flash-all preserve user data.
+# Persist has no payload, but raw merge-bin pads gaps with 0xff.  Consequently
+# this monolithic image is for initial installation/recovery and resets the
+# persistent slot.  Use the Makefile's segmented flash-all target for updates
+# that preserve user data.
 # shellcheck disable=SC2086
 "$ESPTOOL" --chip "$CHIP" merge-bin -o "$OUT_IMAGE" --format raw \
 	$ESPTOOL_FLASH \

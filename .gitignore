@@ -20,7 +20,11 @@ s31_rom.bin
 toolchain
 bootloader/managed_components/
 bootloader/build-radio/
+bootloader/build-radio.container-failed-*/
+linux-esp32-s31.partial-*/
+u-boot-esp32-s31.partial-*/
 logs/
 docs/esp-idf-docs/
 __pycache__/
 *.py[cod]
+Dockerfile.build

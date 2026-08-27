@@ -6,9 +6,8 @@ target_dir="$1"
 
 chmod 0755 "${target_dir}/init"
 
-# The cross-toolchain includes G++, but this compact image has no C++ target
-# packages. Buildroot installs libstdc++ based on toolchain capability alone;
-# omit that otherwise-unused runtime to keep the squashfs inside its partition.
+# This compact image has no C++ target packages.  Keep incremental output trees
+# clean if they were previously built with a C++-capable external toolchain.
 rm -f "${target_dir}"/lib/libstdc++.so*
 
 # Keep incremental builds honest after retiring the FreeRTOS hosted/audio
@@ -20,6 +19,7 @@ rm -f \
 	"${target_dir}/usr/sbin/s31-cpufreq" \
 	"${target_dir}/usr/sbin/s31-freertos-mem" \
 	"${target_dir}/usr/sbin/test.out" \
+	"${target_dir}/usr/bin/s31-peripheral-test" \
 	"${target_dir}/usr/bin/s31-audio-analyze" \
 	"${target_dir}/usr/bin/s31-audio-loopback" \
 	"${target_dir}/usr/bin/s31-audio-mic-test" \

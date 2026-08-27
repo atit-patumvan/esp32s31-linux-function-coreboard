@@ -1,0 +1,37 @@
+#!/bin/sh
+
+usage() {
+	cat <<'EOF'
+Usage: s31-ble scan [seconds]
+       s31-ble up
+       s31-ble down
+       s31-ble status
+EOF
+}
+
+case "${1:-}" in
+	scan)
+		exec ble-scan "${2:-15}"
+		;;
+	up)
+		exec ble-power on
+		;;
+	down)
+		exec ble-power off
+		;;
+	status)
+		if [ ! -d /sys/class/bluetooth/hci0 ]; then
+			echo "hci0 is not registered" >&2
+			exit 1
+		fi
+		echo "controller: hci0"
+		[ -r /sys/class/bluetooth/hci0/address ] && \
+			printf 'address: %s\n' "$(cat /sys/class/bluetooth/hci0/address)"
+		[ -r /sys/class/bluetooth/hci0/name ] && \
+			printf 'name: %s\n' "$(cat /sys/class/bluetooth/hci0/name)"
+		;;
+	*)
+		usage >&2
+		exit 2
+		;;
+esac

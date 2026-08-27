@@ -1,0 +1,109 @@
+#!/bin/sh
+
+set -u
+
+interface=wlan0
+config=/etc/s31-conf/wifi.conf
+pidfile=/run/udhcpc-wlan0.pid
+
+usage() {
+	cat <<'EOF'
+Usage: s31-wifi scan
+       s31-wifi connect <ssid> [passphrase] [--save]
+       s31-wifi up
+       s31-wifi disconnect
+       s31-wifi status
+       s31-wifi forget
+EOF
+}
+
+decode_value() {
+	printf '%s' "$1" | base64 -d
+}
+
+save_config() {
+	mkdir -p /etc/s31-conf
+	umask 077
+	ssid64=$(printf '%s' "$1" | base64 | tr -d '\n')
+	pass64=$(printf '%s' "$2" | base64 | tr -d '\n')
+	tmp="${config}.tmp.$$"
+	{
+		printf 'SSID64=%s\n' "$ssid64"
+		printf 'PASS64=%s\n' "$pass64"
+	} >"$tmp"
+	mv "$tmp" "$config"
+}
+
+connect_network() {
+	ssid=$1
+	pass=${2:-}
+
+	if [ -s "$pidfile" ]; then
+		kill "$(cat "$pidfile")" 2>/dev/null || true
+		rm -f "$pidfile"
+	fi
+	wifi-connect "$interface" "$ssid" "$pass" || return 1
+
+	tries=0
+	while [ "$tries" -lt 20 ]; do
+		[ "$(cat "/sys/class/net/$interface/carrier" 2>/dev/null || echo 0)" = 1 ] && break
+		tries=$((tries + 1))
+		sleep 1
+	done
+	if [ "$tries" -ge 20 ]; then
+		echo "Wi-Fi association timed out" >&2
+		return 1
+	fi
+	udhcpc -i "$interface" -p "$pidfile" -q -t 5 -T 3 -A 3
+}
+
+case "${1:-}" in
+	scan)
+		exec wifi-scan "$interface"
+		;;
+	connect)
+		[ "$#" -ge 2 ] && [ "$#" -le 4 ] || { usage >&2; exit 2; }
+		ssid=$2
+		pass=${3:-}
+		save=0
+		[ "${3:-}" = "--save" ] && { pass=; save=1; }
+		[ "${4:-}" = "--save" ] && save=1
+		connect_network "$ssid" "$pass" || exit 1
+		[ "$save" = 1 ] && save_config "$ssid" "$pass"
+		;;
+	up)
+		[ -r "$config" ] || { echo "No saved Wi-Fi configuration" >&2; exit 1; }
+		SSID64=
+		PASS64=
+		while IFS='=' read -r key value; do
+			case "$key" in
+				SSID64) SSID64=$value ;;
+				PASS64) PASS64=$value ;;
+			esac
+		done <"$config"
+		[ -n "$SSID64" ] || { echo "Invalid Wi-Fi configuration" >&2; exit 1; }
+		connect_network "$(decode_value "$SSID64")" "$(decode_value "$PASS64")"
+		;;
+	disconnect)
+		if [ -s "$pidfile" ]; then
+			kill "$(cat "$pidfile")" 2>/dev/null || true
+			rm -f "$pidfile"
+		fi
+		iw dev "$interface" disconnect 2>/dev/null || true
+		ip addr flush dev "$interface" 2>/dev/null || true
+		;;
+	status)
+		ip link show dev "$interface" || exit 1
+		iw dev "$interface" link 2>/dev/null || true
+		ip -4 addr show dev "$interface"
+		ip route
+		;;
+	forget)
+		rm -f "$config"
+		echo "Saved Wi-Fi configuration removed"
+		;;
+	*)
+		usage >&2
+		exit 2
+		;;
+esac

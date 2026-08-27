@@ -10,11 +10,11 @@ IDF_EXPORT   ?= $(firstword $(wildcard $(IDF_ROOT)/master/esp-idf/export.sh) $(s
 IDF_PATH     ?= $(patsubst %/export.sh,%,$(IDF_EXPORT))
 # Prefer a complete ESP-IDF toolchain: the newest installed compiler need not
 # carry the picolibc multilib used by this ILP32F payload.
-ESP_TOOLS    ?= $(shell find "$(IDF_ROOT)/tools/riscv32-esp-elf" -type f -path '*/bin/riscv32-esp-elf-gcc' 2>/dev/null | sort | while IFS= read -r cc; do d=$$(dirname "$$(dirname "$$cc")"); if test -d "$$d/picolibc/riscv32-esp-elf/lib/rv32imafc_zicsr_zifencei_zaamo_zalrsc/ilp32f"; then printf '%s' "$$d"; break; fi; done)
+ESP_TOOLS    ?= $(shell find "$(IDF_ROOT)/tools/riscv32-esp-elf" -type f -path '*/bin/riscv32-esp-elf-gcc' 2>/dev/null | sort | while IFS= read -r cc; do d=$$(dirname "$$(dirname "$$cc")"); if find "$$d/picolibc/riscv32-esp-elf/lib" -type d -name ilp32f -print -quit 2>/dev/null | grep -q .; then printf '%s' "$$d"; break; fi; done)
 
 # picolibc multilib matching the ilp32f radio world.
-PICOLIBC_LIB := $(ESP_TOOLS)/picolibc/riscv32-esp-elf/lib/rv32imafc_zicsr_zifencei_zaamo_zalrsc/ilp32f
-PICOLIBC_GCC := $(firstword $(wildcard $(ESP_TOOLS)/picolibc/lib/gcc/riscv32-esp-elf/*/rv32imafc_zicsr_zifencei_zaamo_zalrsc/ilp32f))
+PICOLIBC_LIB := $(shell find "$(ESP_TOOLS)/picolibc/riscv32-esp-elf/lib" -type d -name ilp32f -print -quit 2>/dev/null)
+PICOLIBC_GCC := $(shell find "$(ESP_TOOLS)/picolibc/lib/gcc/riscv32-esp-elf" -type d -name ilp32f -print -quit 2>/dev/null)
 
 # The component closure is captured from IDF's generated build.  Its path
 # placeholders are resolved at build time, so the capture has no developer-

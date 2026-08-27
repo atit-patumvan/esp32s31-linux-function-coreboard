@@ -1,0 +1,17 @@
+FROM esp32s31-buildroot:2025.02
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        cmake \
+        flex \
+        bison \
+        device-tree-compiler \
+        libssl-dev \
+        mtd-utils \
+        python3-dev \
+        python3-jsonschema \
+        python3-pyelftools \
+        python3-setuptools \
+        python3-yaml \
+        swig \
+    && rm -rf /var/lib/apt/lists/*

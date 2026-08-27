@@ -1,0 +1,39 @@
+#!/bin/sh
+
+set -u
+
+mountpoint=/media/usb
+
+find_device() {
+	for device in /dev/sd[a-z][0-9] /dev/sd[a-z]; do
+		[ -b "$device" ] && { printf '%s\n' "$device"; return 0; }
+	done
+	return 1
+}
+
+case "${1:-}" in
+	status)
+		if [ -d /sys/bus/usb/devices ]; then
+			for product in /sys/bus/usb/devices/*/product; do
+				[ -r "$product" ] && printf '%s: %s\n' "${product%/product}" "$(cat "$product")"
+			done
+		fi
+		device=$(find_device 2>/dev/null || true)
+		[ -n "$device" ] && echo "storage: $device" || echo "storage: no /dev/sd* device"
+		mount | grep " on $mountpoint " || true
+		;;
+	mount)
+		device=${2:-$(find_device 2>/dev/null || true)}
+		[ -n "$device" ] || { echo "No USB storage block device found" >&2; exit 1; }
+		mkdir -p "$mountpoint"
+		mount "$device" "$mountpoint"
+		echo "$device mounted at $mountpoint"
+		;;
+	unmount|umount)
+		umount "$mountpoint"
+		;;
+	*)
+		echo "Usage: s31-usb-storage {status|mount [device]|unmount}" >&2
+		exit 2
+		;;
+esac

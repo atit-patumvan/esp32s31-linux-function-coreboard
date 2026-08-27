@@ -4,12 +4,13 @@ TOOLCHAIN_DIR := $(CURDIR)/toolchain
 CROSSTOOL_NG_DIR ?= $(abspath $(CURDIR)/../crosstool-NG)
 CROSSTOOL_CONFIG := $(CURDIR)/configs/riscv32-esp-linux-musl.config
 TOOLCHAIN_PREFIX := $(TOOLCHAIN_DIR)/riscv32-esp-linux-musl
+TOOLCHAIN_TUPLE ?= riscv32-esp-linux-musl
 TOOLCHAIN_RELEASE_TAG ?= latest
 TOOLCHAIN_RELEASE_ASSET := riscv32-esp-linux-musl.tar.xz
 TOOLCHAIN_RELEASE_REPOSITORY ?= GrieferPig/crosstool-NG-s31
 TOOLCHAIN_RELEASE_API ?= https://api.github.com/repos/$(TOOLCHAIN_RELEASE_REPOSITORY)/releases/latest
 TOOLCHAIN_RELEASE_DOWNLOAD_BASE ?= https://github.com/$(TOOLCHAIN_RELEASE_REPOSITORY)/releases/download
-CROSS_COMPILE := $(TOOLCHAIN_PREFIX)/bin/riscv32-esp-linux-musl-
+CROSS_COMPILE := $(TOOLCHAIN_PREFIX)/bin/$(TOOLCHAIN_TUPLE)-
 CC := $(CROSS_COMPILE)gcc
 CPP := $(CROSS_COMPILE)cpp
 DTC := dtc
@@ -19,11 +20,11 @@ JOBS ?= $(shell nproc)
 # only on hart 1, so keep it out of the global compiler ISA and expose it
 # through libesp-simd, whose initializer pins users to hart 1 before executing
 # vector instructions.  Kernel and firmware code must remain integer-safe.
-S31_SAFE_ISA := rv32imabc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
-S31_KERNEL_ISA := rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
-S31_USER_ISA := rv32imafbc_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs_xesploop
-S31_COMMON_FLAGS := -mabi=ilp32 -mtune=esp-base
-S31_KERNEL_FLAGS := -mabi=ilp32f -mtune=esp-base
+S31_SAFE_ISA := rv32imacb_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
+S31_KERNEL_ISA := rv32imafcb_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
+S31_USER_ISA := rv32imafcb_zicsr_zifencei_zaamo_zalrsc_zba_zbb_zbc_zbs
+S31_COMMON_FLAGS := -mabi=ilp32
+S31_KERNEL_FLAGS := -mabi=ilp32f
 S31_USER_FLAGS := -march=$(S31_USER_ISA) $(S31_COMMON_FLAGS)
 
 BUILD_DIR := $(CURDIR)/build
@@ -59,7 +60,7 @@ IDF_ROOT ?= $(HOME)/.espressif
 # checkout is preferred, with an installed alternate accepted as a fallback.
 IDF_EXPORT ?= $(firstword $(wildcard $(IDF_ROOT)/master/esp-idf/export.sh) $(wildcard $(IDF_PATH)/export.sh) $(shell find $(IDF_ROOT) -maxdepth 5 -type f -path '*/esp-idf/export.sh' 2>/dev/null | sort | head -n 1))
 
-.PHONY: all download toolchain toolchain-source idf-check opensbi uboot flash-image radio-linux-payload radio-bootloader radio-image linux coremark rootfs initramfs s31-pie-cases \
+.PHONY: all download toolchain toolchain-source idf-check opensbi uboot flash-image radio-linux-payload radio-bootloader radio-image linux coremark rootfs initramfs s31-pie-cases layout-check \
 	buildroot-menuconfig buildroot-clean clean fullclean flash-opensbi flash-linux \
 	flash-dtb flash-rootfs persist flash-persist bootloader flash-bootloader flash-all erase
 
@@ -191,17 +192,25 @@ uboot: idf-check opensbi | $(UBOOT_OUT)
 RADIO_BOOT_BUILD := $(BOOTLOADER_DIR)/build-radio
 RADIO_PARTITION_SIZE := 1966080
 RADIO_PAYLOAD := $(BUILD_DIR)/radio-fw-payload.bin
+S31_RADIO_BOOTLOADER_PREBUILT ?= 0
+S31_RADIO_PAYLOAD_PREBUILT ?= 0
 
 idf-check:
 	@test -f "$(IDF_EXPORT)" || { echo "ERROR: ESP-IDF export.sh not found under $(IDF_ROOT)" >&2; exit 1; }
 
 radio-bootloader: idf-check
 	@echo "--- Build radio-only loader ---"
-	bash -c "source $(IDF_EXPORT) && cd $(BOOTLOADER_DIR) && \
+	@if [ "$(S31_RADIO_BOOTLOADER_PREBUILT)" = "1" ]; then \
+		test -f "$(RADIO_BOOT_BUILD)/esp-idf/esp_wifi/libesp_wifi.a"; \
+		test -f "$(RADIO_BOOT_BUILD)/esp-idf/bt/libbt.a"; \
+		echo "Using prebuilt ESP-IDF radio libraries from $(RADIO_BOOT_BUILD)"; \
+	else \
+		bash -c "source $(IDF_EXPORT) && cd $(BOOTLOADER_DIR) && \
 		S31_RADIO_DEPS=1 idf.py -B build-radio \
 		-D SDKCONFIG=$(RADIO_BOOT_BUILD)/sdkconfig \
 		-D 'SDKCONFIG_DEFAULTS=$(BOOTLOADER_DIR)/sdkconfig;$(BOOTLOADER_DIR)/sdkconfig.radio.defaults' \
-		reconfigure build"
+		reconfigure build"; \
+	fi
 
 RADIO_LINUX_CMDLINE := console=ttyS0,115200n8 root=mtd:rootfs rootfstype=squashfs ro rootwait init=/init clk_ignore_unused
 
@@ -230,17 +239,24 @@ radio-image: opensbi linux
 DEFCONFIG ?= esp32s31_defconfig
 LINUX_TARGET ?= xipImage
 S31_WIFI_ONLY ?= 0
+S31_USB_STORAGE ?= 0
 # CMDLINE_FORCE replaces, rather than extends, the defconfig command line, so
 # retain the rootfs and console arguments here as well.  Both HP harts start by
 # default; normal device IRQs remain pinned to hart 0 via irqaffinity=0.
 LINUX_CMDLINE ?= earlycon=esp32s31uart,mmio,0x2038a000,115200 console=ttyS0,115200n8 root=/dev/mtdblock5 rootfstype=squashfs ro rootwait init=/init clk_ignore_unused irqaffinity=0
 LINUX_PARTITION_SIZE := 6291456
 
-radio-linux-payload: radio-bootloader
-	$(MAKE) -C $(CURDIR)/radio_firmware IDF_ROOT="$(IDF_ROOT)" \
-		S31_WIFI_ONLY="$(S31_WIFI_ONLY)" linux-kbuild
+radio-linux-payload:
+	@if [ "$(S31_RADIO_PAYLOAD_PREBUILT)" = "1" ]; then \
+		test -s "$(LINUX_DIR)/drivers/platform/esp32s31-radio-idf.o_shipped"; \
+		echo "Using prebuilt Linux radio payload"; \
+	else \
+		$(MAKE) --no-print-directory radio-bootloader; \
+		$(MAKE) -C $(CURDIR)/radio_firmware IDF_ROOT="$(IDF_ROOT)" \
+			S31_WIFI_ONLY="$(S31_WIFI_ONLY)" linux-kbuild; \
+	fi
 
-linux: toolchain radio-linux-payload | $(LINUX_OUT)
+linux: toolchain radio-linux-payload layout-check | $(LINUX_OUT)
 	@echo "--- Linux ---"
 	$(MAKE) -C $(LINUX_DIR) O=$(LINUX_OUT) ARCH=riscv CROSS_COMPILE="$(CROSS_COMPILE)" $(DEFCONFIG)
 	$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
@@ -266,6 +282,16 @@ linux: toolchain radio-linux-payload | $(LINUX_OUT)
 		--disable HZ_250 \
 		--disable HZ_300 \
 		--disable HZ_1000
+	@if [ "$(S31_USB_STORAGE)" = "1" ]; then \
+		echo "Enabling experimental USB mass-storage support"; \
+		$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
+			--enable SCSI \
+			--enable BLK_DEV_SD \
+			--enable USB_STORAGE; \
+	else \
+		$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
+			--disable USB_STORAGE; \
+	fi
 	@if [ "$(S31_WIFI_ONLY)" = "1" ]; then \
 		$(LINUX_DIR)/scripts/config --file $(LINUX_OUT)/.config \
 			--disable BT_ESP32S31; \
@@ -295,24 +321,40 @@ coremark: rootfs | $(COREMARK_OUT)
 
 # Keep this decimal because POSIX test(1) and truncate(1) do not accept the
 # partition table's 0x-prefixed value.
+# Match configs/esp32s31-layout.cfg and the fixed partitions in
+# esp32s31.dtsi.  The flash MTD starts at raw offset 0x100000, so its 0xa00000
+# persist and 0xb00000 rootfs offsets correspond to raw 0xB00000 and
+# 0xC00000.  Persist is exactly 1 MiB and rootfs occupies the final 4 MiB.
 ROOTFS_PARTITION_SIZE ?= 4194304
 PERSIST_PARTITION_SIZE ?= 1048576
+
+layout-check:
+	@set -eu; . "$(S31_LAYOUT_CFG)"; \
+	kernel_size=$$((SLOT_PERSIST - SLOT_KERNEL)); \
+	persist_size=$$((SLOT_ROOTFS - SLOT_PERSIST)); \
+	rootfs_size=$$((FLASH_SIZE - SLOT_ROOTFS)); \
+	test "$$kernel_size" -eq "$(LINUX_PARTITION_SIZE)" || { \
+		echo "ERROR: kernel size disagrees with $(S31_LAYOUT_CFG)" >&2; exit 1; }; \
+	test "$$persist_size" -eq "$(PERSIST_PARTITION_SIZE)" || { \
+		echo "ERROR: persist size disagrees with $(S31_LAYOUT_CFG)" >&2; exit 1; }; \
+	test "$$rootfs_size" -eq "$(ROOTFS_PARTITION_SIZE)" || { \
+		echo "ERROR: rootfs size disagrees with $(S31_LAYOUT_CFG)" >&2; exit 1; }
 BUILDROOT_MAKE = $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_OUT) \
 	BR2_EXTERNAL=$(BUILDROOT_EXTERNAL) BR2_DL_DIR=$(BUILDROOT_DL_DIR) \
-	S31_DTBO_DIR=$(LINUX_OUT)/arch/riscv/boot/dts/espressif
+	S31_DTBO_DIR=$(LINUX_OUT)/arch/riscv/boot/dts/espressif \
+	S31_TOOLCHAIN_PATH=$(TOOLCHAIN_PREFIX) \
+	S31_TOOLCHAIN_TUPLE=$(notdir $(CROSS_COMPILE:%-=%))
 
 s31-pie-cases:
 	@$(MAKE) --no-print-directory idf-check
 	bash -c "source $(IDF_EXPORT) >/dev/null && $(CURDIR)/rootfs/gen_s31_pie_cases.sh $(CURDIR)/rootfs/s31_pie_cases.inc"
 
-rootfs: linux toolchain s31-pie-cases | $(BUILDROOT_OUT)
+rootfs: linux toolchain | $(BUILDROOT_OUT)
 	@echo "--- Buildroot rootfs ---"
 	$(BUILDROOT_MAKE) esp32s31_rootfs_defconfig
 	$(BUILDROOT_MAKE) toolchain-external-custom-rebuild
 	$(BUILDROOT_MAKE) toolchain-external-rebuild
-	$(BUILDROOT_MAKE) esp-simd-rebuild
 	$(BUILDROOT_MAKE) s31-tools-rebuild
-	$(BUILDROOT_MAKE) coremark-rebuild
 	$(BUILDROOT_MAKE)
 	cp -v $(BUILDROOT_OUT)/images/rootfs.squashfs $(ROOTFS_IMG)
 	@ROOTFS_SIZE=$$(stat -c%s $(ROOTFS_IMG)); \
@@ -327,7 +369,7 @@ initramfs: linux rootfs
 
 # Generate an empty, NOR-compatible JFFS2 image for the persist partition.
 # This is separate from normal firmware updates so user data is not erased.
-persist: | $(BUILD_DIR)
+persist: layout-check | $(BUILD_DIR)
 	@command -v mkfs.jffs2 >/dev/null || { echo "ERROR: mkfs.jffs2 is required" >&2; exit 1; }
 	@staging=$$(mktemp -d "$(BUILD_DIR)/persist.XXXXXX"); \
 	trap 'rmdir "$$staging"' EXIT; \
