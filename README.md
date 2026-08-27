@@ -145,19 +145,55 @@ Because the root filesystem is read-only, the SSH server generates an
 ephemeral host key in `/var/run` at every boot. Remove the old entry with
 `ssh-keygen -R <board-ip>` if the client reports that the host key changed.
 
-## Experimental split-core wireless
+## Experimental native Wi-Fi, BLE, and persistence
 
-Development on the `feature/wifi-core1` branch keeps the working Ethernet
-profile unchanged while adding an optional split-core wireless architecture.
-ESP-IDF/FreeRTOS owns Wi-Fi on one hart and Linux owns IP networking and cloud
-services on the other. A versioned shared-memory transport carries control
-messages and Ethernet frames; Bluetooth HCI will use a separate channel after
-Wi-Fi is stable.
+The `feature/native-wifi-ble` branch records the current Function-CoreBoard
+bring-up. It supersedes the earlier split-core transport experiment with a
+native Linux radio design: Linux exposes `wlan0` through cfg80211/nl80211 and
+`hci0` through a dedicated ESP32-S31 HCI driver. The earlier
+`feature/wifi-core1` branch remains available for history and compatibility.
 
-The transport ABI and bring-up gates are documented in
-`board/espressif/esp32s31/wireless/README.md`. This profile is not yet
-flashable and must not replace the Ethernet recovery image until its
-bootloader and memory reservations pass on-board validation.
+The 2026-08-27 candidate build includes:
+
+- a 1 MiB JFFS2 upper layer that makes `/etc`, `/root`, and other overlay
+  changes persistent while retaining a compressed read-only SquashFS base;
+- native Wi-Fi scan, WPA2 connection, DHCP, saved credentials, and automatic
+  reconnect;
+- native BLE power control and advertisement scanning without requiring the
+  full BlueZ userspace suite;
+- Dropbear SSH, NTP synchronization, `ip`, `iw`, and `pico`/`nano`;
+- a separate experimental kernel with DWC2 USB-host mass-storage support.
+
+Both kernels fit the existing 6 MiB slot. The normal kernel is 5,920,076 bytes
+and the USB-storage variant is 6,055,244 bytes. The root filesystem is
+2,932,736 bytes in its 4 MiB slot.
+
+The build has passed compile, link, filesystem-content, checksum, and flash
+layout checks. On-board validation is still pending. Do not flash it without
+an external UART console and a verified 16 MiB backup of the working Ethernet
+installation. The tested recovery image and stable branch remain unchanged.
+
+Management commands in the candidate image are:
+
+```sh
+s31-wifi scan
+s31-wifi connect "SSID" "passphrase" --save
+s31-wifi status
+s31-wifi disconnect
+s31-wifi forget
+
+s31-ble up
+s31-ble scan 15
+s31-ble status
+s31-ble down
+
+s31-usb-storage status
+s31-usb-storage mount
+s31-usb-storage unmount
+```
+
+The normal image must be validated before testing the USB-storage variant.
+USB-DBG is the programming/debug connection, not the USB host connector.
 
 ---
 
