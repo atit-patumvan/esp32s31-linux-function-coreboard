@@ -22,4 +22,3 @@ apply_once "$project_dir/buildroot" \
 	"$project_dir/patches/submodules/buildroot-macos-host.patch"
 apply_once "$project_dir/linux-esp32-s31" \
 	"$project_dir/patches/submodules/linux-idf62-iram.patch"
-
