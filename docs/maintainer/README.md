@@ -8,17 +8,19 @@ Linux computer.
 
 1. [Reproducible build](reproducible-build.md) — source pins, Linux packages,
    ESP-IDF, toolchain, Apple-silicon Docker, variants, and artifact checks.
-2. [Storage and flashing](storage-and-flashing.md) — authoritative flash map,
+2. [Feature build selector](feature-build-selector.md) — interactive profiles,
+   scripted flags, automatic clean behavior, and selection manifests.
+3. [Storage and flashing](storage-and-flashing.md) — authoritative flash map,
    SquashFS/JFFS2 overlay, backups, safe partial flashing, reset, and recovery.
-3. [Network services](network-services.md) — Ethernet, DHCP/static IPv4,
+4. [Network services](network-services.md) — Ethernet, DHCP/static IPv4,
    Wi-Fi, DNS, NTP, HTTPS tools, routing, implementation files, and diagnosis.
-4. [SSH and access](ssh-and-access.md) — login keys, persistent Dropbear host
+5. [SSH and access](ssh-and-access.md) — login keys, persistent Dropbear host
    keys, fingerprints, permissions, recovery, and security boundaries.
-5. [Radio, BLE, USB, and gateway](radio-ble-usb-gateway.md) — native radio build
+6. [Radio, BLE, USB, and gateway](radio-ble-usb-gateway.md) — native radio build
    flow, build variants, BLE/USB checks, and the intended BLE-to-cloud design.
-6. [Rootfs maintenance](rootfs-maintenance.md) — Buildroot packages, the 4 MiB
+7. [Rootfs maintenance](rootfs-maintenance.md) — Buildroot packages, the 4 MiB
    budget, curl/CA profile, nano terminfo fix, adding tools, and size recovery.
-7. [Known-good baseline](known-good-baseline.md) — the exact August 2026 source
+8. [Known-good baseline](known-good-baseline.md) — the exact August 2026 source
    identities, image hash, observed board state, and acceptance results.
 
 The shorter operator checklist remains in

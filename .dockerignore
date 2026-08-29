@@ -1,2 +1,3 @@
 **
 !Dockerfile.arm-build
+!Dockerfile.reproducible

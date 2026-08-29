@@ -124,6 +124,17 @@ documents pinned build inputs, the authoritative flash map, persistence,
 Ethernet, Wi-Fi, DNS/NTP, SSH host keys, rootfs sizing, BLE, USB, recovery, and
 the known-good hardware baseline.
 
+To choose a build without remembering Make variables, run the interactive
+feature selector:
+
+```sh
+./tools/s31-build
+```
+
+It supports Wi-Fi-only, Wi-Fi+BLE gateway, optional USB-storage variants, and
+native Linux or reproducible Docker builds. See the
+[feature selector guide](docs/maintainer/feature-build-selector.md).
+
 The default kernel leaves USB mass storage disabled. Build the separately
 testable variant with `S31_USB_STORAGE=1`; do not replace the normal recovery
 candidate until the USB host path has passed an on-board boot test.

@@ -1,0 +1,359 @@
+#!/bin/sh
+
+set -eu
+
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+state_file="$project_dir/build/.s31-feature-state"
+manifest_file="$project_dir/build/s31-build-selection.txt"
+
+profile=gateway
+ble_override=
+usb_override=
+target=all
+executor=auto
+idf_export=${IDF_EXPORT:-}
+toolchain_tag=${TOOLCHAIN_RELEASE_TAG:-esp32s31-linux-gcc-15.2.0-5}
+container_image=esp32s31-linux-build:reproducible
+force_clean=0
+rebuild_container=0
+dry_run=0
+interactive=0
+
+usage() {
+	cat <<'EOF'
+Usage: tools/s31-build [options]
+
+With no options, opens an interactive feature-selection menu.
+
+Profiles:
+  wifi          Wi-Fi only
+  wifi-usb      Wi-Fi plus USB mass storage
+  gateway       Wi-Fi plus BLE
+  gateway-usb   Wi-Fi plus BLE and USB mass storage
+
+Options:
+  --profile NAME           Select a profile
+  --ble | --no-ble         Override Bluetooth HCI selection
+  --usb-storage            Enable USB mass storage
+  --no-usb-storage         Disable USB mass storage
+  --target NAME            all, linux, rootfs, or flash-image
+  --executor NAME          auto, native, or docker
+  --idf-export PATH        Native Linux ESP-IDF export.sh
+  --toolchain-tag TAG      Linux toolchain release tag
+  --container-image NAME   Docker image name
+  --rebuild-container      Rebuild the pinned Docker image
+  --clean                  Force a clean build
+  --dry-run                Print actions without changing files
+  --list-profiles          Show feature values for every profile
+  -h, --help               Show this help
+
+This tool builds artifacts only. It never flashes the board.
+EOF
+}
+
+list_profiles() {
+	cat <<'EOF'
+PROFILE       WI-FI  BLE  USB STORAGE
+wifi          yes    no   no
+wifi-usb      yes    no   yes
+gateway       yes    yes  no
+gateway-usb   yes    yes  yes
+EOF
+}
+
+need_value() {
+	[ "$#" -ge 2 ] || {
+		echo "Missing value after $1" >&2
+		exit 2
+	}
+}
+
+if [ "$#" -eq 0 ]; then
+	interactive=1
+fi
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--profile)
+			need_value "$@"
+			profile=$2
+			shift 2
+			;;
+		--ble) ble_override=1; shift ;;
+		--no-ble) ble_override=0; shift ;;
+		--usb-storage) usb_override=1; shift ;;
+		--no-usb-storage) usb_override=0; shift ;;
+		--target)
+			need_value "$@"
+			target=$2
+			shift 2
+			;;
+		--executor)
+			need_value "$@"
+			executor=$2
+			shift 2
+			;;
+		--idf-export)
+			need_value "$@"
+			idf_export=$2
+			shift 2
+			;;
+		--toolchain-tag)
+			need_value "$@"
+			toolchain_tag=$2
+			shift 2
+			;;
+		--container-image)
+			need_value "$@"
+			container_image=$2
+			shift 2
+			;;
+		--rebuild-container) rebuild_container=1; shift ;;
+		--clean) force_clean=1; shift ;;
+		--dry-run) dry_run=1; shift ;;
+		--list-profiles) list_profiles; exit 0 ;;
+		-h|--help) usage; exit 0 ;;
+		*)
+			echo "Unknown option: $1" >&2
+			usage >&2
+			exit 2
+			;;
+	esac
+done
+
+if [ "$interactive" -eq 1 ]; then
+	cat <<'EOF'
+ESP32-S31 feature build selector
+
+Radio profile:
+  1) Wi-Fi + BLE (gateway)
+  2) Wi-Fi only
+EOF
+	printf 'Select [1]: '
+	IFS= read -r answer
+	case "${answer:-1}" in
+		1) profile=gateway ;;
+		2) profile=wifi ;;
+		*) echo "Invalid radio selection" >&2; exit 2 ;;
+	esac
+
+	cat <<'EOF'
+
+USB mass storage:
+  1) Disabled (safer baseline)
+  2) Enabled (experimental, writable FAT/ext4)
+EOF
+	printf 'Select [1]: '
+	IFS= read -r answer
+	case "${answer:-1}" in
+		1) usb_override=0 ;;
+		2) usb_override=1 ;;
+		*) echo "Invalid USB selection" >&2; exit 2 ;;
+	esac
+
+	cat <<'EOF'
+
+Build output:
+  1) Complete build (recommended)
+  2) Linux kernel and DTB
+  3) Rootfs and its kernel dependencies
+  4) Merged recovery image
+EOF
+	printf 'Select [1]: '
+	IFS= read -r answer
+	case "${answer:-1}" in
+		1) target=all ;;
+		2) target=linux ;;
+		3) target=rootfs ;;
+		4) target=flash-image ;;
+		*) echo "Invalid build target" >&2; exit 2 ;;
+	esac
+
+	cat <<'EOF'
+
+Build executor:
+  1) Auto-detect (recommended)
+  2) Native Linux
+  3) Reproducible amd64 Docker
+EOF
+	printf 'Select [1]: '
+	IFS= read -r answer
+	case "${answer:-1}" in
+		1) executor=auto ;;
+		2) executor=native ;;
+		3) executor=docker ;;
+		*) echo "Invalid executor" >&2; exit 2 ;;
+	esac
+fi
+
+case "$profile" in
+	wifi) ble=0; usb=0 ;;
+	wifi-usb) ble=0; usb=1 ;;
+	gateway) ble=1; usb=0 ;;
+	gateway-usb) ble=1; usb=1 ;;
+	*)
+		echo "Unknown profile: $profile" >&2
+		list_profiles >&2
+		exit 2
+		;;
+esac
+
+[ -z "$ble_override" ] || ble=$ble_override
+[ -z "$usb_override" ] || usb=$usb_override
+
+case "$ble:$usb" in
+	0:0) profile=wifi ;;
+	0:1) profile=wifi-usb ;;
+	1:0) profile=gateway ;;
+	1:1) profile=gateway-usb ;;
+esac
+
+case "$target" in
+	all|linux|rootfs|flash-image) ;;
+	*) echo "Unsupported target: $target" >&2; exit 2 ;;
+esac
+
+case "$executor" in
+	auto)
+		case "$(uname -s):$(uname -m)" in
+			Linux:x86_64|Linux:amd64) executor=native ;;
+			*) executor=docker ;;
+		esac
+		;;
+	native|docker) ;;
+	*) echo "Unsupported executor: $executor" >&2; exit 2 ;;
+esac
+
+wifi_only=1
+[ "$ble" -eq 0 ] || wifi_only=0
+
+desired_state=$(printf 'S31_WIFI_ONLY=%s\nS31_USB_STORAGE=%s' \
+	"$wifi_only" "$usb")
+need_clean=$force_clean
+if [ "$need_clean" -eq 0 ]; then
+	if [ -f "$state_file" ]; then
+		old_state=$(cat "$state_file")
+		[ "$old_state" = "$desired_state" ] || need_clean=1
+	elif [ -d "$project_dir/build/linux-6.18" ] ||
+	     [ -f "$project_dir/radio_firmware/linux_radio.kbuild.o" ]; then
+		need_clean=1
+	fi
+fi
+
+printf '\nSelected ESP32-S31 build\n'
+printf '  Profile:       %s\n' "$profile"
+printf '  Wi-Fi:         enabled\n'
+if [ "$ble" -eq 1 ]; then
+	printf '  BLE HCI:       enabled\n'
+else
+	printf '  BLE HCI:       disabled (Wi-Fi-only kernel)\n'
+fi
+if [ "$usb" -eq 1 ]; then
+	printf '  USB storage:   enabled (experimental)\n'
+else
+	printf '  USB storage:   disabled\n'
+fi
+printf '  Target:        %s\n' "$target"
+printf '  Executor:      %s\n' "$executor"
+printf '  Toolchain:     %s\n' "$toolchain_tag"
+if [ "$need_clean" -eq 1 ]; then
+	printf '  Clean first:   yes\n'
+else
+	printf '  Clean first:   no\n'
+fi
+
+if [ "$interactive" -eq 1 ]; then
+	printf '\nStart this build? [Y/n]: '
+	IFS= read -r answer
+	case "${answer:-y}" in
+		y|Y|yes|YES) ;;
+		*) echo "Build cancelled"; exit 0 ;;
+	esac
+fi
+
+if [ "$dry_run" -eq 1 ]; then
+	printf '\nDry run: no files changed and no build started.\n'
+	exit 0
+fi
+
+if [ "$executor" = native ] && [ "$(uname -s)" != Linux ]; then
+	echo "Native builds require Linux; select --executor docker on this host" >&2
+	exit 2
+fi
+
+ensure_container() {
+	command -v docker >/dev/null 2>&1 || {
+		echo "Docker is required for the selected executor" >&2
+		exit 1
+	}
+	if [ "$rebuild_container" -eq 1 ] ||
+	   ! docker image inspect "$container_image" >/dev/null 2>&1; then
+		docker build --platform linux/amd64 \
+			-f "$project_dir/Dockerfile.reproducible" \
+			-t "$container_image" "$project_dir"
+	fi
+}
+
+docker_command() {
+	docker run --rm --platform linux/amd64 \
+		--entrypoint /bin/bash \
+		-e S31_WIFI_ONLY="$wifi_only" \
+		-e S31_USB_STORAGE="$usb" \
+		-e S31_BUILD_TARGET="$target" \
+		-e TOOLCHAIN_RELEASE_TAG="$toolchain_tag" \
+		-v "$project_dir:/src" -w /src \
+		"$container_image" -lc "$1"
+}
+
+cd "$project_dir"
+
+if [ "$executor" = docker ]; then
+	ensure_container
+	if [ "$need_clean" -eq 1 ]; then
+		docker_command 'make -C radio_firmware clean && make clean'
+	fi
+	docker_command '
+		source "$IDF_PATH/export.sh"
+		make S31_WIFI_ONLY="$S31_WIFI_ONLY" \
+			S31_USB_STORAGE="$S31_USB_STORAGE" \
+			TOOLCHAIN_RELEASE_TAG="$TOOLCHAIN_RELEASE_TAG" \
+			IDF_EXPORT="$IDF_PATH/export.sh" "$S31_BUILD_TARGET"
+	'
+else
+	command -v make >/dev/null 2>&1 || {
+		echo "make is required for a native build" >&2
+		exit 1
+	}
+	if [ -n "$idf_export" ] && [ ! -f "$idf_export" ]; then
+		echo "ESP-IDF export script not found: $idf_export" >&2
+		exit 1
+	fi
+	if [ "$need_clean" -eq 1 ]; then
+		make -C radio_firmware clean
+		make clean
+	fi
+	if [ -n "$idf_export" ]; then
+		make S31_WIFI_ONLY="$wifi_only" S31_USB_STORAGE="$usb" \
+			TOOLCHAIN_RELEASE_TAG="$toolchain_tag" \
+			IDF_EXPORT="$idf_export" "$target"
+	else
+		make S31_WIFI_ONLY="$wifi_only" S31_USB_STORAGE="$usb" \
+			TOOLCHAIN_RELEASE_TAG="$toolchain_tag" "$target"
+	fi
+fi
+
+mkdir -p "$project_dir/build"
+printf '%s\n' "$desired_state" >"$state_file"
+source_commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+{
+	printf 'PROFILE=%s\n' "$profile"
+	printf 'S31_WIFI_ONLY=%s\n' "$wifi_only"
+	printf 'S31_USB_STORAGE=%s\n' "$usb"
+	printf 'TARGET=%s\n' "$target"
+	printf 'EXECUTOR=%s\n' "$executor"
+	printf 'TOOLCHAIN_RELEASE_TAG=%s\n' "$toolchain_tag"
+	printf 'SOURCE_COMMIT=%s\n' "$source_commit"
+} >"$manifest_file"
+
+printf '\nBuild completed. No flash operation was performed.\n'
+printf 'Selection manifest: %s\n' "$manifest_file"

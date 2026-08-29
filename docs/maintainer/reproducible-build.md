@@ -103,6 +103,15 @@ artifacts remain under the bind-mounted `build/` directory.
 
 ## Build variants
 
+The recommended interface for selecting variants is the
+[feature build selector](feature-build-selector.md):
+
+```sh
+./tools/s31-build
+```
+
+The direct Make commands below remain useful for automation and diagnosis.
+
 The normal image enables Wi-Fi and the experimental BLE HCI driver:
 
 ```sh

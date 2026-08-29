@@ -39,6 +39,19 @@ build with `S31_WIFI_ONLY=1`. Experimental USB mass-storage support is opt-in:
 make S31_USB_STORAGE=1 linux rootfs
 ```
 
+Alternatively, select the combined BLE-gateway and writable USB-storage build
+interactively:
+
+```sh
+./tools/s31-build
+```
+
+or non-interactively:
+
+```sh
+./tools/s31-build --profile gateway-usb --target all
+```
+
 ## 2. Flash without erasing persistent data
 
 Routine firmware updates should not erase the 1 MiB `persist` partition.
