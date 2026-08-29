@@ -242,6 +242,7 @@ fi
 
 printf '\nSelected ESP32-S31 build\n'
 printf '  Profile:       %s\n' "$profile"
+printf '  Ethernet LAN:  enabled (DHCP/static IPv4)\n'
 printf '  Wi-Fi:         enabled\n'
 if [ "$ble" -eq 1 ]; then
 	printf '  BLE HCI:       enabled\n'

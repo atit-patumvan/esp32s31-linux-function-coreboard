@@ -132,7 +132,8 @@ feature selector:
 ```
 
 It supports Wi-Fi-only, Wi-Fi+BLE gateway, optional USB-storage variants, and
-native Linux or reproducible Docker builds. See the
+native Linux or reproducible Docker builds. Ethernet LAN remains enabled in
+every profile with DHCP by default and persistent static-IP support. See the
 [feature selector guide](docs/maintainer/feature-build-selector.md).
 
 The default kernel leaves USB mass storage disabled. Build the separately

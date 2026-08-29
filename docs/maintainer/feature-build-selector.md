@@ -119,7 +119,9 @@ Archive this manifest with the firmware hashes.
 The selector changes only the supported kernel/radio variants. All profiles
 retain the standard rootfs baseline:
 
-- Ethernet with DHCP configuration
+- native Ethernet LAN (`eth0`) with DHCP configuration
+- persistent static Ethernet IPv4 configuration through
+  `/etc/network/interfaces`
 - persistent overlay storage
 - Dropbear SSH and persistent host keys
 - NTP and runtime DNS
@@ -129,6 +131,25 @@ retain the standard rootfs baseline:
 
 Removing individual rootfs packages requires editing the Buildroot defconfig
 and repeating the rootfs size and hardware acceptance process.
+
+### Why LAN is not an on/off selection
+
+The native GMAC and YT8531 PHY support are part of the standard kernel and cost
+very little compared with the radio and USB-storage variants. Keeping `eth0`
+available also provides a valuable recovery and administration path if Wi-Fi
+configuration fails. For those reasons, LAN remains enabled in `wifi`,
+`wifi-usb`, `gateway`, and `gateway-usb` profiles.
+
+DHCP is the immutable default:
+
+```text
+auto eth0
+iface eth0 inet dhcp
+```
+
+Because `/etc` is backed by the persistent overlay, the operator can replace
+that stanza with a static address without rebuilding the firmware. See the
+[network services guide](network-services.md#static-ethernet-ipv4).
 
 ## Build targets
 
