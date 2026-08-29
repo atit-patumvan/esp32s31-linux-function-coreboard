@@ -118,6 +118,12 @@ For first boot, Wi-Fi, Ethernet, SSH, HTTPS, editor, persistence, BLE, and USB
 storage checks, follow the
 [Function-CoreBoard test guide](docs/function-coreboard-test.md).
 
+For rebuilding on another Mac or Linux host and maintaining each subsystem,
+use the [Function-CoreBoard maintainer handbook](docs/maintainer/README.md). It
+documents pinned build inputs, the authoritative flash map, persistence,
+Ethernet, Wi-Fi, DNS/NTP, SSH host keys, rootfs sizing, BLE, USB, recovery, and
+the known-good hardware baseline.
+
 The default kernel leaves USB mass storage disabled. Build the separately
 testable variant with `S31_USB_STORAGE=1`; do not replace the normal recovery
 candidate until the USB host path has passed an on-board boot test.

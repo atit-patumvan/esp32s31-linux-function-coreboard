@@ -14,6 +14,9 @@ before flashing:
 ls /dev/cu.usb*
 ```
 
+For subsystem implementation details and recovery decisions, see the
+[maintainer handbook](maintainer/README.md).
+
 ## 1. Build
 
 Clone the public branch and initialize its pinned submodules:

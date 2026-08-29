@@ -2,6 +2,10 @@
 
 This project uses a unified `Makefile` at the root directory to manage downloading the toolchain, out-of-tree builds for all components, and flashing the firmware to the board. All build artifacts are cleanly separated into the `build/` directory.
 
+For pinned ESP-IDF/toolchain versions, native Ubuntu setup, Apple-silicon
+Docker commands, build variants, and reproducibility checks, see the
+[reproducible build guide](maintainer/reproducible-build.md).
+
 ## Build Targets
 
 ### Default Target
