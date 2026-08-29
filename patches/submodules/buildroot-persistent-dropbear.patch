@@ -1,0 +1,39 @@
+diff --git a/package/dropbear/S50dropbear b/package/dropbear/S50dropbear
+index 9474eaafaa..7174f6eaa4 100644
+--- a/package/dropbear/S50dropbear
++++ b/package/dropbear/S50dropbear
+@@ -9,21 +9,19 @@ test -r /etc/default/dropbear && . /etc/default/dropbear
+ start() {
+ 	DROPBEAR_ARGS="$DROPBEAR_ARGS -R"
+ 
+-	# If /etc/dropbear is a symlink to /var/run/dropbear, and
+-	#   - the filesystem is RO (i.e. we can not rm the symlink),
+-	#     create the directory pointed to by the symlink.
+-	#   - the filesystem is RW (i.e. we can rm the symlink),
+-	#     replace the symlink with an actual directory
+-	if [ -L /etc/dropbear \
+-	     -a "$(readlink /etc/dropbear)" = "/var/run/dropbear" ]
+-	then
+-		if rm -f /etc/dropbear >/dev/null 2>&1; then
+-			mkdir -p /etc/dropbear
+-		else
+-			echo "No persistent location to store SSH host keys. New keys will be"
+-			echo "generated at each boot. Are you sure this is what you want to do?"
+-			mkdir -p "$(readlink /etc/dropbear)"
+-		fi
++	# Do not replace the read-only root's /etc/dropbear symlink through an
++	# overlayfs upper backed by JFFS2: that filesystem cannot represent the
++	# required whiteout. Redirect its volatile /run target to persistent flash.
++	if [ -L /etc/dropbear ] &&
++	   [ "$(readlink /etc/dropbear)" = "/var/run/dropbear" ]; then
++		mkdir -p /persist/dropbear
++		chmod 700 /persist/dropbear
++		rm -rf /var/run/dropbear
++		ln -s /persist/dropbear /var/run/dropbear
++	elif [ -L /etc/dropbear ]; then
++		mkdir -p "$(readlink /etc/dropbear)"
++	else
++		mkdir -p /etc/dropbear
+ 	fi
+ 
+ 	printf "Starting dropbear sshd: "

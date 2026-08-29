@@ -41,7 +41,7 @@ $ esptool -p /dev/ttyUSB0 -b 2000000 write-flash \
 | Feature | Status |
 |---|---|
 | Buildroot rootfs | 🟢 Stable |
-| Reboot | 🟢 Stable |
+| Reboot | 🟡 Experimental (some boards require an external reset) |
 | Poweroff | 🔴 Not Implemented |
 | Linux native wireless | 🟡 Experimental |
 | - WiFi | 🟡 Experimental |
@@ -96,8 +96,8 @@ Refer to the [Build Instructions](docs/build.md).
 ### Function-CoreBoard native radio candidate
 
 The `feature/function-coreboard-native-radio` profile adds a persistent
-SquashFS/JFFS2 overlay, Dropbear SSH, NTP, native `wlan0`, native `hci0`, and
-compact management commands:
+SquashFS/JFFS2 overlay, DHCP Ethernet, Dropbear SSH with persistent host keys,
+NTP, native `wlan0`, native `hci0`, and compact management commands:
 
 ```sh
 s31-wifi scan
@@ -109,6 +109,15 @@ s31-ble down
 s31-usb-storage status
 ```
 
+The 4 MiB rootfs also includes `ip`, `ethtool`, CA-verified HTTP/HTTPS
+`curl`, `nc`, `tracepath`, and the tiny `nano` editor with a `pico` alias.
+The curl build is intentionally limited to HTTP and HTTPS so that the gateway
+tools and the complete CA bundle fit in the fixed rootfs slot.
+
+For first boot, Wi-Fi, Ethernet, SSH, HTTPS, editor, persistence, BLE, and USB
+storage checks, follow the
+[Function-CoreBoard test guide](docs/function-coreboard-test.md).
+
 The default kernel leaves USB mass storage disabled. Build the separately
 testable variant with `S31_USB_STORAGE=1`; do not replace the normal recovery
 candidate until the USB host path has passed an on-board boot test.
@@ -118,6 +127,11 @@ and 4 MiB for the SquashFS rootfs. `make layout-check` verifies these boundaries
 before producing an image. A merged full-flash image resets persistence because
 raw `merge-bin` output pads the persistent gap with `0xff`; use the segmented
 `flash-all` target for routine updates that preserve user data.
+
+On the currently tested Function-CoreBoard, Linux completes shutdown after
+`reboot` but does not assert the final SoC reset. Use the board reset control or
+a non-destructive USB-DBG reset to start it again; persisted data survives this
+reset.
 
 ## S31 Quirks
 

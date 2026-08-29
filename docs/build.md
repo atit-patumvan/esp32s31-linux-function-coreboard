@@ -7,8 +7,8 @@ This project uses a unified `Makefile` at the root directory to manage downloadi
 ### Default Target
 - **`make all`** (or just **`make`**)
   The default target. It downloads and verifies the pinned prebuilt toolchain,
-  then executes `download`, `opensbi`, `linux`, and `initramfs`. It never
-  builds the compiler from source.
+  then builds U-Boot, Linux, the Buildroot rootfs, and the merged flash image.
+  It never builds the compiler from source.
 
 ### Download & Toolchain
 - **`make download`**
@@ -33,12 +33,12 @@ This project uses a unified `Makefile` at the root directory to manage downloadi
 - **`make rootfs`**
   Uses the pinned Buildroot submodule and the ESP32-S31 br2-external tree to
   build a complete S31-optimized RV32IMAFBC/musl userspace with HWLoop and PIE
-  assembler support. It includes BusyBox, BlueZ tools,
-  Dropbear, iproute2, tcpdump, memtester, CoreMark, and the project
+  assembler support. It includes BusyBox, Dropbear, iproute2, ethtool, curl,
+  netcat, tracepath, nano/pico, CoreMark, and the project
   diagnostics. The generated SquashFS is copied to `build/rootfs.sqfs` and
-  padded to the rootfs partition size. BusyBox `wget` supports HTTPS and
-  HTTP-to-HTTPS redirects using its size-optimized internal TLS client; this
-  client encrypts transfers but does not validate CA certificates.
+  must fit the fixed 4 MiB rootfs slot. Curl supports CA-verified HTTP and HTTPS
+  through mbedTLS. BusyBox `wget` uses its smaller internal TLS client and does
+  not validate CA certificates.
 - **`make initramfs`**
   Compatibility name for `make rootfs`; this is the preferred rootfs build
   command for this project.

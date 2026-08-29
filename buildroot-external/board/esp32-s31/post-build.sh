@@ -29,6 +29,41 @@ rm -f \
 rm -rf "${target_dir}/usr/share/alsa"
 rm -f "${target_dir}"/usr/lib/libasound.so*
 
+# curl and libcurl use the generated CA bundle. The individual Mozilla source
+# certificates and c_rehash links duplicate that data in this 4 MiB rootfs.
+# Cache the bundle because Buildroot's incremental finalization runs before this
+# script and its source certificates were intentionally removed on the prior run.
+ca_bundle="${target_dir}/etc/ssl/certs/ca-certificates.crt"
+ca_cache="$(dirname "${target_dir}")/build/s31-ca-certificates.crt"
+if [ -s "${ca_bundle}" ]; then
+	cp "${ca_bundle}" "${ca_cache}"
+elif [ -s "${ca_cache}" ]; then
+	cp "${ca_cache}" "${ca_bundle}"
+else
+	echo "Missing generated CA certificate bundle" >&2
+	exit 1
+fi
+if [ -f "${ca_bundle}" ]; then
+	find "${target_dir}/etc/ssl/certs" -type l -delete
+	rm -rf "${target_dir}/usr/share/ca-certificates"
+fi
+
+# A case-insensitive macOS build host makes tic use hexadecimal directories
+# (for example 78/xterm), while target ncurses expects x/xterm. Provide both
+# lookup layouts without duplicating the terminfo data.
+terminfo_dir="${target_dir}/usr/share/terminfo"
+for mapping in a:61 d:64 l:6c p:70 s:73 v:76 x:78; do
+	letter="${mapping%%:*}"
+	hex="${mapping#*:}"
+	[ -d "${terminfo_dir}/${hex}" ] || continue
+	mkdir -p "${terminfo_dir}/${letter}"
+	for entry in "${terminfo_dir}/${hex}"/*; do
+		[ -f "${entry}" ] || continue
+		ln -sf "../${hex}/${entry##*/}" \
+			"${terminfo_dir}/${letter}/${entry##*/}"
+	done
+done
+
 rm -rf \
 	"${target_dir}/tmp" \
 	"${target_dir}/run" \

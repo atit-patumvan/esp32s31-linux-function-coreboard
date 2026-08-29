@@ -38,6 +38,7 @@ connect_network() {
 	ssid=$1
 	pass=${2:-}
 
+	ip link set "$interface" up || return 1
 	if [ -s "$pidfile" ]; then
 		kill "$(cat "$pidfile")" 2>/dev/null || true
 		rm -f "$pidfile"
@@ -59,6 +60,7 @@ connect_network() {
 
 case "${1:-}" in
 	scan)
+		ip link set "$interface" up || exit 1
 		exec wifi-scan "$interface"
 		;;
 	connect)
@@ -75,7 +77,9 @@ case "${1:-}" in
 		[ -r "$config" ] || { echo "No saved Wi-Fi configuration" >&2; exit 1; }
 		SSID64=
 		PASS64=
-		while IFS='=' read -r key value; do
+		while IFS= read -r line; do
+			key=${line%%=*}
+			value=${line#*=}
 			case "$key" in
 				SSID64) SSID64=$value ;;
 				PASS64) PASS64=$value ;;

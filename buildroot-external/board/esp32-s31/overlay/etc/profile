@@ -2,3 +2,10 @@ export PATH=/sbin:/bin:/usr/sbin:/usr/bin
 export HOME=/root
 export USER=root
 export LOGNAME=root
+
+# This compact ncurses database provides the broadly compatible xterm entry.
+# macOS Terminal commonly exports xterm-256color over SSH, which otherwise
+# prevents nano/pico from starting on this image.
+case "${TERM:-}" in
+	xterm-256color) export TERM=xterm ;;
+esac
